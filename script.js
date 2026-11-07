@@ -1,21 +1,3 @@
-let dataset = JSON.parse(localStorage.getItem('DMS_LAUNDRY_TRANSAKSI')) || [
-    { resi: 'LD-0001', nama: 'Rina Melati', hp: '081234567890', layanan: 'Cuci Kiloan (3 kg)', berat: 3, tipe: 'Dijemput kurir', alamat: 'Jl. Melati No. 12', jam: 'Besok, 09.00-11.00', catatan: 'Pakaian kantor', subtotal: 21000, diskon: 0, ongkir: 3000, total: 24000, metode: 'Transfer', statusBayar: 'Lunas', status: 'Selesai', tanggal: '2026-11-01' },
-    { resi: 'LD-0002', nama: 'Budi Santoso', hp: '085712345678', layanan: 'Express (2 kg)', berat: 2, tipe: 'Antar sendiri ke toko', alamat: '', jam: 'Hari ini, 16.00 WIB', catatan: 'Jangan pakai pewangi kuat', subtotal: 20000, diskon: 0, ongkir: 0, total: 20000, metode: 'QRIS', statusBayar: 'Lunas', status: 'Diproses', tanggal: '2026-11-06' },
-    { resi: 'LD-0003', nama: 'Siti Aminah', hp: '081298765432', layanan: 'Cuci Kiloan (5 kg)', berat: 5, tipe: 'Order di Toko', alamat: '', jam: 'Lusa, 12.00 WIB', catatan: '', subtotal: 35000, diskon: 5000, ongkir: 0, total: 30000, metode: 'Tunai', statusBayar: 'Lunas', status: 'Diproses', tanggal: '2026-11-07' }
-];
-
-let users = JSON.parse(localStorage.getItem('DMS_LAUNDRY_USERS')) || [
-    { nama: 'Rina Melati', hp: '081234567890', password: 'User123' },
-    { nama: 'Budi Santoso', hp: '085712345678', password: 'User123' }
-];
-
-let currentUser = JSON.parse(sessionStorage.getItem('DMS_LAUNDRY_USER')) || null;
-let loginTimer = null;
-let logoutTimer = null;
-
-function saveData() { localStorage.setItem('DMS_LAUNDRY_TRANSAKSI', JSON.stringify(dataset)); }
-function saveUsers() { localStorage.setItem('DMS_LAUNDRY_USERS', JSON.stringify(users)); }
-
 // ========================================================
 // NAVIGASI SCREEN UTAMA (Landing, Auth, Dashboard)
 // ========================================================
