@@ -308,7 +308,7 @@
                             <i class="fa-solid fa-file-invoice text-sm"></i> Input Order
                         </button>
                         <button onclick="switchAdminTab('pesanan-online')" id="admin-nav-online" class="flex-1 md:w-full text-left px-4 py-2.5 rounded-xl text-slate-300 hover:bg-navy-800 hover:text-white transition flex items-center justify-between">
-                            <span class="flex items-center gap-2.5"><i class="fa-solid fa-globe text-sm"></i> Pesanan Online</span>
+                            <span class="flex items-center gap-2.5"><i class="fa-solid fa-list-check text-sm"></i> Kelola Pesanan</span>
                             <span id="badge-online-count" class="bg-teal-700 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">0</span>
                         </button>
                     </nav>
@@ -338,7 +338,9 @@
                             <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
                                 <div class="flex justify-between items-center">
                                     <label class="text-xs font-bold text-slate-900">Pelanggan</label>
-                                    <button type="button" onclick="quickNewCustomer()" class="text-xs font-semibold text-teal-700 hover:underline">+ Pelanggan baru</button>
+                                    <button type="button" onclick="openNewCustomerModal()" class="text-xs font-semibold text-teal-700 hover:underline flex items-center gap-1">
+                                        <i class="fa-solid fa-plus-circle"></i> Pelanggan baru
+                                    </button>
                                 </div>
                                 <div>
                                     <span class="block text-[11px] text-slate-500 mb-1">Cari nama atau No. HP</span>
@@ -356,7 +358,10 @@
 
                             <!-- Card Item Cucian -->
                             <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
-                                <label class="text-xs font-bold text-slate-900 block">Item cucian</label>
+                                <div class="flex justify-between items-center">
+                                    <label class="text-xs font-bold text-slate-900">Item cucian</label>
+                                    <span class="text-[11px] font-semibold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">Minimal order 1 kg</span>
+                                </div>
                                 <div class="overflow-x-auto">
                                     <table class="w-full text-left text-xs">
                                         <thead class="text-slate-400 font-semibold border-b border-slate-100">
@@ -377,7 +382,7 @@
                                                 <td id="subtotal-kiloan-text" class="py-2.5 text-right font-semibold text-slate-800">Rp 0</td>
                                             </tr>
                                             <tr>
-                                                <td class="py-2.5 font-medium text-slate-800">Express</td>
+                                                <td class="py-2.5 font-medium text-slate-800">Express (H+4 Jam)</td>
                                                 <td class="py-2.5">
                                                     <input type="number" id="qty-express" min="0" step="0.5" value="0" oninput="calculateKasirTotals()" class="w-20 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center font-semibold"> kg
                                                 </td>
@@ -389,23 +394,99 @@
                                 </div>
                             </div>
 
-                            <!-- Card Pengambilan -->
-                            <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-2">
-                                <label class="text-xs font-bold text-slate-900 block">Pengambilan</label>
-                                <span class="block text-[11px] text-slate-500">Estimasi selesai</span>
-                                <input type="text" id="kasir-estimasi" value="Besok, 17:00" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-teal-700">
+                            <!-- Card Tipe Order & Pengambilan Kasir -->
+                            <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
+                                <label class="text-xs font-bold text-slate-900 block">Tipe Order / Metode Serah Terima</label>
+                                <div id="kasir-tipe-group" class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    <button type="button" onclick="selectKasirTipe('Order di Toko', this)" class="btn-kasir-tipe active p-2.5 rounded-xl border border-teal-600 bg-teal-50 text-teal-800 text-xs font-bold text-left transition flex items-center gap-2">
+                                        <i class="fa-solid fa-shop text-sm flex-shrink-0"></i>
+                                        <div>
+                                            <div>Order di Toko</div>
+                                            <div class="text-[10px] font-normal text-teal-600">Ambil di gerai (Rp 0)</div>
+                                        </div>
+                                    </button>
+                                    <button type="button" onclick="selectKasirTipe('Dijemput kurir', this)" class="btn-kasir-tipe p-2.5 rounded-xl border border-slate-200 hover:border-teal-600 text-slate-700 text-xs font-medium text-left transition flex items-center gap-2">
+                                        <i class="fa-solid fa-motorcycle text-sm flex-shrink-0"></i>
+                                        <div>
+                                            <div>Dijemput Kurir</div>
+                                            <div class="text-[10px] text-slate-500">Antar-jemput (+Rp 3.000)</div>
+                                        </div>
+                                    </button>
+                                    <button type="button" onclick="selectKasirTipe('Antar sendiri ke toko', this)" class="btn-kasir-tipe p-2.5 rounded-xl border border-slate-200 hover:border-teal-600 text-slate-700 text-xs font-medium text-left transition flex items-center gap-2">
+                                        <i class="fa-solid fa-store text-sm flex-shrink-0"></i>
+                                        <div>
+                                            <div>Antar Sendiri</div>
+                                            <div class="text-[10px] text-slate-500">Bawa ke toko (Rp 0)</div>
+                                        </div>
+                                    </button>
+                                </div>
+                                <input type="hidden" id="kasir-tipe-val" value="Order di Toko">
+
+                                <!-- Alamat Penjemputan / Pengantaran (Jika Dijemput Kurir) -->
+                                <div id="section-kasir-alamat" class="hidden pt-2 border-t border-slate-100">
+                                    <label class="block text-xs font-semibold text-slate-700 mb-1">Alamat Lengkap Pengantaran / Penjemputan Kurir <span class="text-rose-500">*</span></label>
+                                    <input type="text" id="kasir-alamat" placeholder="Jalan, nomor rumah, patokan..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-teal-700">
+                                </div>
+                            </div>
+
+                            <!-- Card Pengambilan & Jadwal Selesai -->
+                            <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
+                                <div class="flex justify-between items-center">
+                                    <label class="text-xs font-bold text-slate-900">Estimasi Jadwal Selesai</label>
+                                    <button type="button" onclick="setKasirExpress4Jam()" class="text-[11px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg transition flex items-center gap-1">
+                                        <i class="fa-solid fa-bolt text-amber-500"></i> ⚡ Express: Otomatis 4 Jam
+                                    </button>
+                                </div>
+
+                                <!-- Pilihan Tombol Hari dan Jam untuk Kiloan -->
+                                <div class="space-y-2 pt-1 border-t border-slate-100">
+                                    <div class="text-[11px] font-semibold text-slate-600">
+                                        Pilih Hari:
+                                    </div>
+                                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs" id="group-kasir-hari">
+                                        <button type="button" onclick="selectKasirHari('Hari ini', this)" class="btn-kasir-hari px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-700 text-center font-medium transition text-[11px]">Hari ini</button>
+                                        <button type="button" onclick="selectKasirHari('Besok', this)" class="btn-kasir-hari active px-2.5 py-1.5 rounded-lg border border-teal-600 bg-teal-50 text-teal-800 text-center font-bold transition text-[11px]">Besok</button>
+                                        <button type="button" onclick="selectKasirHari('Lusa', this)" class="btn-kasir-hari px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-700 text-center font-medium transition text-[11px]">Lusa</button>
+                                        <button type="button" onclick="selectKasirHari('3 Hari', this)" class="btn-kasir-hari px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-700 text-center font-medium transition text-[11px]">3 Hari</button>
+                                    </div>
+
+                                    <div class="text-[11px] font-semibold text-slate-600 pt-1">
+                                        Pilih Jam Selesai:
+                                    </div>
+                                    <div class="grid grid-cols-3 sm:grid-cols-5 gap-1.5 text-xs" id="group-kasir-jam">
+                                        <button type="button" onclick="selectKasirJam('09:00', this)" class="btn-kasir-jam px-1.5 py-1.5 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-700 text-center font-medium transition text-[11px]">09:00</button>
+                                        <button type="button" onclick="selectKasirJam('12:00', this)" class="btn-kasir-jam px-1.5 py-1.5 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-700 text-center font-medium transition text-[11px]">12:00</button>
+                                        <button type="button" onclick="selectKasirJam('15:00', this)" class="btn-kasir-jam px-1.5 py-1.5 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-700 text-center font-medium transition text-[11px]">15:00</button>
+                                        <button type="button" onclick="selectKasirJam('17:00', this)" class="btn-kasir-jam active px-1.5 py-1.5 rounded-lg border border-teal-600 bg-teal-50 text-teal-800 text-center font-bold transition text-[11px]">17:00</button>
+                                        <button type="button" onclick="selectKasirJam('20:00', this)" class="btn-kasir-jam px-1.5 py-1.5 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-700 text-center font-medium transition text-[11px]">20:00</button>
+                                    </div>
+                                </div>
+
+                                <div class="pt-2 border-t border-slate-100">
+                                    <span class="block text-[11px] text-slate-500 mb-1">Estimasi Jadwal Selesai:</span>
+                                    <input type="text" id="kasir-estimasi" value="Besok, 17:00 WIB" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-teal-700">
+                                </div>
                             </div>
                         </div>
 
                         <!-- Right Column (Pembayaran & Checkout) -->
                         <div class="lg:col-span-5">
                             <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-5">
-                                <h3 class="text-sm font-bold text-slate-900">Pembayaran</h3>
+                                <div class="flex justify-between items-center">
+                                    <h3 class="text-sm font-bold text-slate-900">Pembayaran</h3>
+                                    <button type="button" onclick="openQrisModal()" class="text-[11px] font-bold text-teal-700 hover:text-teal-800 hover:underline flex items-center gap-1">
+                                        <i class="fa-solid fa-qrcode"></i> Info QRIS & Bank
+                                    </button>
+                                </div>
 
                                 <div class="space-y-2 text-xs border-b border-slate-100 pb-4">
                                     <div class="flex justify-between text-slate-600">
-                                        <span>Subtotal</span>
+                                        <span>Subtotal Cucian</span>
                                         <span id="kasir-subtotal-display" class="font-semibold text-slate-800">Rp 0</span>
+                                    </div>
+                                    <div class="flex justify-between items-center text-slate-600">
+                                        <span>Ongkir Kurir</span>
+                                        <span id="kasir-ongkir-display" class="font-semibold text-slate-800">Rp 0</span>
                                     </div>
                                     <div class="flex justify-between items-center text-slate-600">
                                         <span>Diskon</span>
@@ -465,35 +546,41 @@
                     </form>
                 </div>
 
-                <!-- TAB 2: PESANAN ONLINE (Page 12 & 14) -->
+                <!-- TAB 2: KELOLA PESANAN (ORDER TOKO & ONLINE) -->
                 <div id="admin-tab-online" class="hidden space-y-6">
-                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
                         <div>
-                            <h1 class="text-2xl font-bold text-slate-900">Pesanan online</h1>
-                            <p class="text-xs text-slate-500 mt-1">Daftar pesanan jemput dan antar dari pelanggan online.</p>
+                            <h1 class="text-2xl font-bold text-slate-900">Kelola Seluruh Pesanan</h1>
+                            <p class="text-xs text-slate-500 mt-1">Daftar & update pesanan order di toko kasir serta pesanan jemput-antar online.</p>
                         </div>
 
                         <!-- Filter Pills -->
-                        <div class="flex items-center space-x-2">
-                            <button onclick="filterOnlineOrders('Semua', this)" class="filter-pill active px-3.5 py-1.5 rounded-full text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-600 transition">Semua</button>
-                            <button onclick="filterOnlineOrders('Baru', this)" class="filter-pill px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition">Baru</button>
-                            <button onclick="filterOnlineOrders('Dijemput', this)" class="filter-pill px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition">Dijemput</button>
-                            <button onclick="filterOnlineOrders('Diproses', this)" class="filter-pill px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition">Diproses</button>
+                        <div class="flex flex-wrap items-center gap-1.5" id="admin-filter-container">
+                            <button onclick="filterOnlineOrders('Semua', this)" class="filter-pill active px-3 py-1.5 rounded-full text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-600 transition">Semua (<span id="count-all-orders">0</span>)</button>
+                            <button onclick="filterOnlineOrders('Menunggu Konfirmasi', this)" class="filter-pill px-3 py-1.5 rounded-full text-xs font-semibold bg-white text-amber-700 border border-amber-300 hover:bg-amber-50 transition"><i class="fa-solid fa-clock text-[10px]"></i> Menunggu Konfirmasi</button>
+                            <button onclick="filterOnlineOrders('Dijemput kurir', this)" class="filter-pill px-3 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition"><i class="fa-solid fa-motorcycle text-[10px]"></i> Dijemput Kurir</button>
+                            <button onclick="filterOnlineOrders('Antar sendiri ke toko', this)" class="filter-pill px-3 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition"><i class="fa-solid fa-store text-[10px]"></i> Antar Sendiri</button>
+                            <button onclick="filterOnlineOrders('Order di Toko', this)" class="filter-pill px-3 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition"><i class="fa-solid fa-shop text-[10px]"></i> Order Kasir</button>
+                            <button onclick="filterOnlineOrders('Baru', this)" class="filter-pill px-3 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition">Baru</button>
+                            <button onclick="filterOnlineOrders('Diproses', this)" class="filter-pill px-3 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition">Diproses</button>
+                            <button onclick="filterOnlineOrders('Siap diantar', this)" class="filter-pill px-3 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition">Siap Antar/Ambil</button>
+                            <button onclick="filterOnlineOrders('Selesai', this)" class="filter-pill px-3 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition">Selesai</button>
                         </div>
                     </div>
 
-                    <!-- Table (Desktop View Page 14) -->
+                    <!-- Responsive Orders Container: Cards for Mobile & Table for Desktop -->
                     <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-                        <div class="overflow-x-auto">
+                        <!-- Desktop Table View -->
+                        <div class="hidden md:block overflow-x-auto">
                             <table class="w-full text-left text-xs">
                                 <thead class="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                                     <tr>
                                         <th class="p-4">Resi</th>
                                         <th class="p-4">Pelanggan</th>
-                                        <th class="p-4">Layanan</th>
+                                        <th class="p-4">Tipe Order</th>
+                                        <th class="p-4">Layanan & Berat</th>
                                         <th class="p-4">Pembayaran</th>
-                                        <th class="p-4">Pengambilan</th>
-                                        <th class="p-4">Jam jemput</th>
+                                        <th class="p-4">Estimasi / Jadwal</th>
                                         <th class="p-4">Status</th>
                                         <th class="p-4 text-center">Aksi</th>
                                     </tr>
@@ -501,6 +588,9 @@
                                 <tbody id="tabel-online-body" class="divide-y divide-slate-100"></tbody>
                             </table>
                         </div>
+
+                        <!-- Mobile Cards View -->
+                        <div id="tabel-online-cards" class="md:hidden space-y-3 p-3"></div>
                     </div>
                 </div>
             </main>
@@ -512,23 +602,23 @@
         <section id="view-pelanggan" class="hidden min-h-screen flex flex-col bg-slate-50">
             <!-- Top Header (Page 8 & 16) -->
             <header class="border-b border-slate-200 bg-white sticky top-0 z-40">
-                <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-                    <div class="flex items-center space-x-8">
-                        <span class="text-xl font-bold tracking-tight text-teal-700">DMS Laundry</span>
-                        <nav class="flex space-x-6 text-xs font-semibold h-16 items-center">
-                            <button onclick="switchPelangganTab('buat')" id="pelanggan-tab-btn-buat" class="h-full border-b-2 border-teal-700 text-teal-700 font-bold transition">
+                <div class="max-w-6xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between">
+                    <div class="flex items-center space-x-3 sm:space-x-8">
+                        <span class="text-base sm:text-xl font-bold tracking-tight text-teal-700 whitespace-nowrap">DMS Laundry</span>
+                        <nav class="flex space-x-2 sm:space-x-6 text-xs font-semibold h-14 sm:h-16 items-center">
+                            <button onclick="switchPelangganTab('buat')" id="pelanggan-tab-btn-buat" class="h-full border-b-2 border-teal-700 text-teal-700 font-bold transition px-1.5 sm:px-2 whitespace-nowrap">
                                 Buat Pesanan
                             </button>
-                            <button onclick="switchPelangganTab('pesanan')" id="pelanggan-tab-btn-pesanan" class="h-full border-b-2 border-transparent text-slate-500 hover:text-slate-800 transition">
+                            <button onclick="switchPelangganTab('pesanan')" id="pelanggan-tab-btn-pesanan" class="h-full border-b-2 border-transparent text-slate-500 hover:text-slate-800 transition px-1.5 sm:px-2 whitespace-nowrap">
                                 Pesanan Saya
                             </button>
                         </nav>
                     </div>
 
-                    <div class="flex items-center space-x-3 text-xs">
-                        <span class="text-slate-500 hidden sm:inline">Pelanggan · <strong id="pelanggan-name-nav" class="text-slate-800">Rina</strong></span>
-                        <button onclick="handleLogout()" class="text-slate-500 hover:text-rose-600 font-medium transition">
-                            Keluar
+                    <div class="flex items-center space-x-2 sm:space-x-3 text-xs">
+                        <span class="text-slate-500 hidden md:inline">Pelanggan · <strong id="pelanggan-name-nav" class="text-slate-800">Rina</strong></span>
+                        <button onclick="handleLogout()" class="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-rose-300 text-slate-600 hover:text-rose-600 font-semibold transition text-xs flex items-center gap-1.5 shadow-sm">
+                            <i class="fa-solid fa-right-from-bracket text-[11px]"></i> <span>Keluar</span>
                         </button>
                     </div>
                 </div>
@@ -558,9 +648,9 @@
                             <input type="hidden" id="pelanggan-layanan-val" value="Cuci Kiloan">
                         </div>
 
-                        <!-- Pengambilan -->
+                        <!-- Pilihan Pengambilan: Dijemput Kurir atau Antar Sendiri ke Toko -->
                         <div class="space-y-2">
-                            <label class="text-xs font-bold text-slate-800 block">Pengambilan</label>
+                            <label class="text-xs font-bold text-slate-800 block">Metode Pengambilan & Antar</label>
                             <div id="pelanggan-pengambilan-group" class="grid grid-cols-2 gap-2.5">
                                 <button type="button" onclick="selectPelangganRadio('pengambilan', 'Dijemput kurir', this)" class="radio-pill active text-left">
                                     <span class="radio-dot"></span> Dijemput kurir
@@ -572,17 +662,114 @@
                             <input type="hidden" id="pelanggan-pengambilan-val" value="Dijemput kurir">
                         </div>
 
-                        <!-- Alamat Jemput -->
-                        <div id="section-pelanggan-alamat">
-                            <label class="block text-xs font-bold text-slate-800 mb-1.5">Alamat jemput</label>
-                            <input type="text" id="pelanggan-alamat" placeholder="Alamat lengkap (nama jalan, no. rumah, patokan)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-teal-700">
+                        <!-- Info Card: Dijemput Kurir -->
+                        <div id="info-kurir-jemput" class="p-3.5 bg-teal-50 border border-teal-200 rounded-2xl flex items-center gap-3 text-xs text-teal-900 shadow-sm">
+                            <div class="w-10 h-10 rounded-xl bg-teal-700 text-white flex items-center justify-center flex-shrink-0 text-base shadow-sm">
+                                <i class="fa-solid fa-motorcycle"></i>
+                            </div>
+                            <div>
+                                <div class="font-extrabold text-teal-950">Dijemput & Diantar oleh Kurir</div>
+                                <div class="text-[11px] text-teal-700 mt-0.5">Kurir DMS Laundry akan langsung mendatangi alamat Anda untuk mengambil pakaian cucian (Ongkir Rp 3.000).</div>
+                            </div>
                         </div>
 
-                        <!-- Jam Jemput -->
-                        <div>
-                            <label class="block text-xs font-bold text-slate-800 mb-1.5">Jam jemput</label>
-                            <input type="text" id="pelanggan-jam" value="Besok, 09.00-11.00" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-teal-700">
+                        <!-- Info Card: Antar Sendiri ke Toko -->
+                        <div id="info-antar-sendiri" class="hidden p-3.5 bg-slate-100 border border-slate-200 rounded-2xl flex items-center gap-3 text-xs text-slate-800 shadow-sm">
+                            <div class="w-10 h-10 rounded-xl bg-slate-700 text-white flex items-center justify-center flex-shrink-0 text-base shadow-sm">
+                                <i class="fa-solid fa-shop"></i>
+                            </div>
+                            <div>
+                                <div class="font-extrabold text-slate-900">Antar & Ambil Sendiri di Toko</div>
+                                <div class="text-[11px] text-slate-600 mt-0.5">Bawa cucian Anda langsung ke Toko DMS Laundry, Jl. Kampus Unim, Mojokerto. Bebas ongkir (Rp 0).</div>
+                            </div>
                         </div>
+
+                        <!-- Alamat Jemput (Hanya muncul jika Dijemput Kurir) -->
+                        <div id="section-pelanggan-alamat">
+                            <label class="block text-xs font-bold text-slate-800 mb-1.5">Alamat Penjemputan Kurir <span class="text-rose-500">*</span></label>
+                            <input type="text" id="pelanggan-alamat" placeholder="Alamat lengkap (nama jalan, no. rumah, patokan / petunjuk lokasi)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-teal-700">
+                        </div>
+
+                        <!-- Berat Cucian (Minimal 1 kg) -->
+                        <div class="space-y-1.5">
+                            <div class="flex justify-between items-center">
+                                <label class="text-xs font-bold text-slate-800">Estimasi Berat Cucian</label>
+                                <span class="text-[11px] font-semibold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">Minimal order 1 kg</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <input type="number" id="pelanggan-berat" min="1" step="0.5" value="3" oninput="calculatePelangganTotals()" class="w-28 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-teal-700">
+                                <span class="text-xs text-slate-500 font-semibold">kg</span>
+                            </div>
+                        </div>
+
+                        <!-- TAMPILAN 1: BOX KHUSUS EXPRESS (TAMPILKAN JAM PENJEMPUTAN & PENGANTARAN) -->
+                        <div id="box-express-jadwal" class="hidden p-4 bg-amber-50 border border-amber-300 rounded-2xl space-y-3">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-sm shadow-sm"><i class="fa-solid fa-bolt"></i></span>
+                                    <div>
+                                        <div class="font-extrabold text-xs text-amber-950">Layanan Kilat Express (4 Jam Selesai)</div>
+                                        <div class="text-[10px] text-amber-700">Penjemputan kilat dan pengantaran tepat waktu</div>
+                                    </div>
+                                </div>
+                                <span class="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-amber-200 text-amber-900 border border-amber-300">Prioritas Kilat</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                                <div class="p-3 bg-white rounded-xl border border-amber-200 shadow-sm space-y-1">
+                                    <span id="express-label-jemput" class="text-[10px] text-slate-500 block font-semibold flex items-center gap-1"><i class="fa-solid fa-truck-pickup text-amber-600"></i> Jam Penjemputan Kurir:</span>
+                                    <span id="express-jam-jemput" class="font-extrabold text-slate-900 font-mono text-xs block">Hari ini, Segera (~30 Menit)</span>
+                                    <span id="express-desc-jemput" class="text-[10px] text-slate-400 block">Kurir segera datang ke alamat Anda</span>
+                                </div>
+                                <div class="p-3 bg-white rounded-xl border border-amber-200 shadow-sm space-y-1">
+                                    <span id="express-label-antar" class="text-[10px] text-slate-500 block font-semibold flex items-center gap-1"><i class="fa-solid fa-house text-emerald-600"></i> Tentukan Hari & Jam Pengantaran (Selesai):</span>
+                                    <span id="express-jam-antar" class="font-extrabold text-teal-800 font-mono text-xs block">Hari ini, 16:30 WIB</span>
+                                    <span id="express-desc-antar" class="text-[10px] text-emerald-700 font-semibold block">H+4 Jam langsung diantar kembali oleh kurir</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TAMPILAN 2: FORM JADWAL PENGAMBILAN KILOAN (MINIMAL H+1) -->
+                        <div class="space-y-3 p-4 bg-slate-50 border border-slate-200 rounded-2xl" id="section-pelanggan-jadwal">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-900" id="label-jadwal-title">Tentukan Hari Pengantaran</label>
+                                    <p class="text-[10px] text-slate-500" id="label-jadwal-subtitle">Tentukan hari dan jam pengantaran oleh kurir (Minimal H+1 hari dari order)</p>
+                                </div>
+                                <span id="pelanggan-jadwal-badge" class="text-[11px] font-semibold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">Minimal H+1</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                                <!-- Pilih Hari / Tanggal -->
+                                <div>
+                                    <label class="block font-semibold text-slate-700 mb-1" id="label-jadwal-tgl">Tentukan Hari / Tanggal Pengantaran (Min. H+1)</label>
+                                    <input type="date" id="pelanggan-tgl-ambil" onchange="updatePelangganJadwalFromInputs()" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-teal-700">
+                                    <!-- Tombol Cepat Pilihan Hari -->
+                                    <div class="flex gap-1.5 mt-1.5" id="pelanggan-quick-days">
+                                        <button type="button" onclick="setPelangganQuickDay(1, this)" class="btn-quick-day active flex-1 py-1 rounded-lg border border-teal-600 bg-teal-50 text-teal-800 text-[10px] font-bold text-center transition">Diantar Besok (H+1)</button>
+                                        <button type="button" onclick="setPelangganQuickDay(2, this)" class="btn-quick-day flex-1 py-1 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-600 text-[10px] font-medium text-center transition">Diantar Lusa (H+2)</button>
+                                        <button type="button" onclick="setPelangganQuickDay(3, this)" class="btn-quick-day flex-1 py-1 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-600 text-[10px] font-medium text-center transition">Diantar H+3</button>
+                                    </div>
+                                </div>
+
+                                <!-- Pilih Jam Pengambilan / Pengantaran -->
+                                <div>
+                                    <label class="block font-semibold text-slate-700 mb-1" id="label-jadwal-jam">Tentukan Jam Pengantaran Kurir</label>
+                                    <select id="pelanggan-jam-ambil" onchange="updatePelangganJadwalFromInputs()" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-teal-700">
+                                        <option value="09:00 - 11:00 WIB">09:00 - 11:00 WIB (Pagi)</option>
+                                        <option value="11:00 - 13:00 WIB">11:00 - 13:00 WIB (Siang)</option>
+                                        <option value="14:00 - 16:00 WIB">14:00 - 16:00 WIB (Sore)</option>
+                                        <option value="16:00 - 18:00 WIB">16:00 - 18:00 WIB (Sore)</option>
+                                        <option value="18:00 - 20:00 WIB">18:00 - 20:00 WIB (Malam)</option>
+                                    </select>
+                                    <div class="text-[10px] text-teal-700 mt-2 font-medium flex items-center gap-1" id="label-jadwal-info">
+                                        <i class="fa-solid fa-truck-fast"></i> Kurir akan mengantarkan cucian ke rumah Anda sesuai jam ini
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <input type="hidden" id="pelanggan-jam" value="">
 
                         <!-- Catatan (opsional) -->
                         <div>
@@ -595,27 +782,26 @@
                             <label class="text-xs font-bold text-slate-800 block">Metode pembayaran</label>
                             <div id="pelanggan-metode-group" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                                 <button type="button" onclick="selectPelangganRadio('metode', 'Transfer', this)" class="radio-pill active text-left">
-                                    <span class="radio-dot"></span> Transfer
+                                    <span class="radio-dot"></span> Transfer (Bank Jago)
                                 </button>
                                 <button type="button" onclick="selectPelangganRadio('metode', 'QRIS', this)" class="radio-pill text-left">
-                                    <span class="radio-dot"></span> QRIS
+                                    <span class="radio-dot"></span> QRIS (Scan Barcode)
                                 </button>
                                 <button type="button" onclick="selectPelangganRadio('metode', 'E-wallet', this)" class="radio-pill text-left">
-                                    <span class="radio-dot"></span> E-wallet
+                                    <span class="radio-dot"></span> E-wallet (GoPay)
                                 </button>
                                 <button type="button" onclick="selectPelangganRadio('metode', 'Tunai saat jemput/antar', this)" class="radio-pill text-left">
                                     <span class="radio-dot"></span> Tunai saat jemput/antar
                                 </button>
                             </div>
                             <input type="hidden" id="pelanggan-metode-val" value="Transfer">
-                            <p class="text-[10px] text-slate-500 pt-1">Detail rekening atau kode QR tampil setelah pesanan dikirim.</p>
                         </div>
 
                         <!-- Ringkasan Biaya -->
                         <div class="pt-4 border-t border-slate-100 space-y-1.5 text-xs">
                             <div class="flex justify-between text-slate-600">
-                                <span>Estimasi biaya</span>
-                                <span class="font-semibold text-slate-800">Rp 21.000 (est. 3 kg)</span>
+                                <span>Estimasi biaya cucian</span>
+                                <span id="pelanggan-subtotal-text" class="font-semibold text-slate-800">Rp 21.000</span>
                             </div>
                             <div class="flex justify-between text-slate-600">
                                 <span>Ongkos jemput</span>
@@ -914,6 +1100,7 @@
                 </div>
                 <div class="border-t border-b border-dashed border-slate-300 py-2 space-y-1">
                     <div class="flex justify-between"><span id="rec-layanan"></span><span id="rec-subtotal"></span></div>
+                    <div id="rec-row-ongkir" class="flex justify-between hidden"><span>Ongkir Kurir:</span><span id="rec-ongkir">Rp 0</span></div>
                     <div class="flex justify-between"><span>Diskon:</span><span id="rec-diskon">Rp 0</span></div>
                 </div>
                 <div class="flex justify-between font-bold text-sm">
@@ -927,6 +1114,290 @@
             <div class="flex gap-2 pt-2">
                 <button onclick="window.print()" class="flex-1 bg-teal-700 text-white font-bold py-2.5 rounded-xl text-xs hover:bg-teal-800">Print</button>
                 <button onclick="closeReceipt()" class="flex-1 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-xl text-xs hover:bg-slate-200">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================
+         MODAL 4: INPUT PELANGGAN BARU (POP UP KASIR)
+         ======================================================== -->
+    <div id="modal-pelanggan-baru" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm hidden transition-all duration-200">
+        <div class="max-w-md w-full bg-white rounded-3xl p-6 shadow-2xl space-y-4 animate-popup border border-slate-100">
+            <div class="flex justify-between items-center border-b border-slate-100 pb-3">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center text-sm font-bold">
+                        <i class="fa-solid fa-user-plus"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-extrabold text-slate-900">Tambah Pelanggan Baru</h3>
+                        <p class="text-[11px] text-slate-500">Daftarkan pelanggan ke sistem kasir & cloud Supabase.</p>
+                    </div>
+                </div>
+                <button type="button" onclick="closeNewCustomerModal()" class="text-slate-400 hover:text-slate-700 transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <form onsubmit="submitNewCustomerModal(event)" class="space-y-3.5 text-xs">
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">Nama Lengkap Pelanggan <span class="text-rose-500">*</span></label>
+                    <input type="text" id="modal-cust-nama" required placeholder="Contoh: Siti Aisyah" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-teal-700">
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">Nomor WhatsApp / HP <span class="text-rose-500">*</span></label>
+                    <input type="tel" id="modal-cust-hp" required placeholder="Contoh: 081234567890 (10-13 digit)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 font-mono focus:outline-none focus:border-teal-700">
+                    <span class="text-[10px] text-slate-400 mt-1 block">Wajib diawali 08 atau 62, minimal 10 dan maksimal 13 digit.</span>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">Alamat (Opsional)</label>
+                    <input type="text" id="modal-cust-alamat" placeholder="Jl. Melati No. 5..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-teal-700">
+                </div>
+
+                <div class="flex gap-2 pt-2">
+                    <button type="button" onclick="closeNewCustomerModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl transition">
+                        Batal
+                    </button>
+                    <button type="submit" class="flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl transition shadow-sm">
+                        Simpan Pelanggan
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ========================================================
+         MODAL 5: METODE & RINCIAN PEMBAYARAN (QRIS, GOPAY, BANK JAGO)
+         ======================================================== -->
+    <div id="modal-pembayaran-qris" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm hidden transition-all duration-200">
+        <div class="max-w-md w-full bg-white rounded-3xl p-6 shadow-2xl space-y-4 animate-popup border border-slate-100 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b border-slate-100 pb-3">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center text-sm font-bold">
+                        <i class="fa-solid fa-qrcode"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-extrabold text-slate-900">Rincian Pembayaran</h3>
+                        <p class="text-[11px] text-slate-500">Scan QRIS atau transfer ke rekening resmi DMS Laundry.</p>
+                    </div>
+                </div>
+                <button type="button" onclick="closeQrisModal()" class="text-slate-400 hover:text-slate-700 transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Total Nominal Pembayaran -->
+            <div class="bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200 rounded-2xl p-4 text-center">
+                <span class="text-[11px] font-semibold text-slate-600 block">Total Tagihan Pembayaran</span>
+                <span id="modal-qris-nominal" class="text-2xl font-black text-teal-800 tracking-tight">Rp 24.000</span>
+                <span id="modal-qris-resi-info" class="text-[10px] text-teal-600 font-mono block mt-0.5">DMS Laundry Official Payment</span>
+            </div>
+
+            <!-- Card QRIS -->
+            <div class="border border-slate-200 rounded-2xl p-4 text-center bg-slate-50 space-y-3">
+                <div class="flex items-center justify-center gap-2">
+                    <span class="text-xs font-bold text-slate-800">QRIS All Payment</span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-teal-700 text-white">Instant</span>
+                </div>
+                <div class="bg-white p-2.5 rounded-xl border border-slate-200 shadow-inner inline-block">
+                    <img src="QRIS.jpeg" alt="QRIS DMS Laundry" class="w-48 h-auto mx-auto rounded-lg object-contain">
+                </div>
+                <p class="text-[10px] text-slate-500 leading-relaxed px-2">
+                    Mendukung semua aplikasi e-Wallet (GoPay, OVO, DANA, ShopeePay, LinkAja) & Mobile Banking (BCA, Mandiri, BRI, BNI, Jago, dll).
+                </p>
+            </div>
+
+            <!-- Card GoPay & Bank Jago -->
+            <div class="space-y-2 text-xs">
+                <!-- GoPay -->
+                <div class="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-white hover:border-teal-500 transition">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-lg bg-teal-100 text-teal-800 font-bold flex items-center justify-center text-xs">
+                            <i class="fa-solid fa-wallet"></i>
+                        </div>
+                        <div>
+                            <div class="font-bold text-slate-800">GoPay</div>
+                            <div class="font-mono text-xs font-semibold text-teal-700">085230087985</div>
+                            <div class="text-[10px] text-slate-400">a.n DMS Laundry</div>
+                        </div>
+                    </div>
+                    <button type="button" onclick="copyPaymentData('085230087985', this)" class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-teal-50 text-slate-700 hover:text-teal-700 text-[11px] font-bold transition flex items-center gap-1">
+                        <i class="fa-regular fa-copy"></i> Salin
+                    </button>
+                </div>
+
+                <!-- Bank Jago -->
+                <div class="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-white hover:border-teal-500 transition">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 font-bold flex items-center justify-center text-xs">
+                            <i class="fa-solid fa-building-columns"></i>
+                        </div>
+                        <div>
+                            <div class="font-bold text-slate-800">Bank Jago</div>
+                            <div class="font-mono text-xs font-semibold text-amber-700">501470678966</div>
+                            <div class="text-[10px] text-slate-400">a.n DMS Laundry</div>
+                        </div>
+                    </div>
+                    <button type="button" onclick="copyPaymentData('501470678966', this)" class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-amber-50 text-slate-700 hover:text-amber-700 text-[11px] font-bold transition flex items-center gap-1">
+                        <i class="fa-regular fa-copy"></i> Salin
+                    </button>
+                </div>
+            </div>
+
+            <div class="pt-2 space-y-2">
+                <button type="button" onclick="konfirmasiSudahBayar()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-circle-check"></i> Saya Sudah Bayar (Konfirmasi Pembayaran)
+                </button>
+                <button type="button" onclick="closeQrisModal()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition">
+                    Tutup Rincian Pembayaran
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================
+         MODAL 6: UPDATE PESANAN ADMIN (ORDER TOKO & ONLINE)
+         ======================================================== -->
+    <div id="modal-admin-update-pesanan" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm hidden transition-all duration-200">
+        <div class="max-w-md w-full bg-white rounded-3xl p-6 shadow-2xl space-y-4 animate-popup border border-slate-100 max-h-[92vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b border-slate-100 pb-3">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center text-sm font-bold">
+                        <i class="fa-solid fa-pen-to-square"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-extrabold text-slate-900">Update Pesanan</h3>
+                        <p class="text-[11px] text-slate-500">Perbarui status pengerjaan, pembayaran, dan rincian pesanan.</p>
+                    </div>
+                </div>
+                <button type="button" onclick="closeAdminUpdateModal()" class="text-slate-400 hover:text-slate-700 transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <form onsubmit="submitAdminUpdateModal(event)" class="space-y-4 text-xs">
+                <!-- Info Header Pesanan -->
+                <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
+                    <div class="flex justify-between items-center">
+                        <span class="text-slate-500">No. Resi:</span>
+                        <span id="update-modal-resi" class="font-extrabold text-teal-700 font-mono text-sm"></span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-slate-500">Pelanggan:</span>
+                        <span id="update-modal-nama" class="font-bold text-slate-800"></span>
+                    </div>
+                </div>
+
+                <input type="hidden" id="update-modal-resi-val">
+
+                <!-- Tipe Order / Metode Pengantaran -->
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1.5">Tipe Order / Metode Pengantaran</label>
+                    <select id="update-modal-tipe" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-teal-700">
+                        <option value="Order di Toko">Order di Toko (Kasir)</option>
+                        <option value="Antar sendiri ke toko">Antar sendiri ke toko</option>
+                        <option value="Dijemput kurir">Dijemput kurir</option>
+                    </select>
+                </div>
+
+                <!-- Status Pengerjaan -->
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1.5">Status Pengerjaan</label>
+                    <select id="update-modal-status" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-teal-700">
+                        <option value="Menunggu Konfirmasi">Menunggu Konfirmasi (Verifikasi Pembayaran)</option>
+                        <option value="Baru">Baru</option>
+                        <option value="Dijemput">Dijemput (Kurir jemput pakaian)</option>
+                        <option value="Diproses">Diproses (Sedang Dicuci)</option>
+                        <option value="Siap diantar">Siap diantar (Kurir antar ke rumah)</option>
+                        <option value="Siap diambil">Siap diambil (Pelanggan ambil di toko)</option>
+                        <option value="Selesai">Selesai (Sudah Diambil/Diterima)</option>
+                    </select>
+                </div>
+
+                <!-- Status Pembayaran -->
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1.5">Status Pembayaran</label>
+                    <select id="update-modal-status-bayar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-teal-700">
+                        <option value="Menunggu Konfirmasi">Menunggu Konfirmasi (Belum Dicek Admin)</option>
+                        <option value="Belum dibayar">Belum dibayar</option>
+                        <option value="Lunas">Lunas</option>
+                    </select>
+                </div>
+
+                <!-- Metode Pembayaran -->
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1.5">Metode Pembayaran</label>
+                    <select id="update-modal-metode" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-teal-700">
+                        <option value="Tunai">Tunai</option>
+                        <option value="Transfer">Transfer (Bank Jago)</option>
+                        <option value="QRIS">QRIS</option>
+                        <option value="E-wallet">E-wallet (GoPay)</option>
+                        <option value="Tunai saat jemput/antar">Tunai saat jemput/antar</option>
+                    </select>
+                </div>
+
+                <!-- Berat & Total Tagihan -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">Berat (kg)</label>
+                        <input type="number" id="update-modal-berat" step="0.1" min="1" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-teal-700">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">Total Biaya (Rp)</label>
+                        <input type="number" id="update-modal-total" step="1000" min="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-teal-700">
+                    </div>
+                </div>
+
+                <!-- Estimasi Selesai / Jadwal -->
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">Jadwal / Estimasi Selesai</label>
+                    <input type="text" id="update-modal-jam" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-teal-700">
+                </div>
+
+                <!-- Catatan -->
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">Catatan</label>
+                    <input type="text" id="update-modal-catatan" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-teal-700">
+                </div>
+
+                <div class="flex gap-2 pt-2 border-t border-slate-100">
+                    <button type="button" onclick="closeAdminUpdateModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl transition">
+                        Batal
+                    </button>
+                    <button type="submit" class="flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl transition shadow-sm">
+                        Simpan Perubahan
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ========================================================
+         MODAL 7: POP-UP DETAIL & RINGKASAN ORDER (MUDAH DIBACA)
+         ======================================================== -->
+    <div id="modal-readable-detail" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm hidden transition-all duration-200">
+        <div class="max-w-md w-full bg-white rounded-3xl p-6 shadow-2xl space-y-4 animate-popup border border-slate-100 max-h-[92vh] overflow-y-auto">
+            <div class="text-center space-y-2">
+                <div id="popup-detail-icon-wrap" class="w-14 h-14 bg-teal-50 border border-teal-200 text-teal-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm">
+                    <i id="popup-detail-icon" class="fa-solid fa-circle-check"></i>
+                </div>
+                <h3 id="popup-detail-title" class="text-lg font-extrabold text-slate-900 leading-snug">Pesanan Berhasil Dibuat!</h3>
+                <p id="popup-detail-subtitle" class="text-xs text-slate-500 leading-relaxed"></p>
+            </div>
+
+            <!-- Card Rincian Ringkas & Mudah Dibaca -->
+            <div id="popup-detail-card" class="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2 text-xs">
+                <!-- Rows injected dynamically by showReadableModal() -->
+            </div>
+
+            <div id="popup-detail-actions" class="flex flex-col sm:flex-row gap-2 pt-2">
+                <button type="button" id="popup-detail-btn-sec" onclick="closeReadableDetailModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition">
+                    Tutup
+                </button>
+                <button type="button" id="popup-detail-btn-pri" class="flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm">
+                    Lanjut
+                </button>
             </div>
         </div>
     </div>

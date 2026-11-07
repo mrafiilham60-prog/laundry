@@ -2,42 +2,93 @@
 // KONFIGURASI & KONEKSI SUPABASE: DMS LAUNDRY
 // ========================================================
 
-/**
- * PANDUAN MENGHUBUNGKAN KE SUPABASE:
- * 1. Buka dashboard proyek Supabase Anda: https://supabase.com/dashboard
- * 2. Masuk ke Project Settings -> Configuration -> API
- * 3. Salin "Project URL" dan tempel ke SUPABASE_URL di bawah ini.
- * 4. Salin "anon public" API Key dan tempel ke SUPABASE_ANON_KEY di bawah ini.
- * 5. Jalankan query SQL dari file "supabase_schema.sql" di SQL Editor Supabase.
- */
-
 const SUPABASE_CONFIG = {
-    // URL Proyek Supabase Anda:
     url: 'https://fcsplxevjjxrqweuivuk.supabase.co',
-    
-    // Anon Public Key Anda:
     anonKey: 'sb_publishable_Ua2erxAJovQoXaarKIdQgg_9leNdozJ'
 };
 
-// Cek apakah konfigurasi Supabase sudah diisi dengan benar
+// Cek apakah konfigurasi Supabase valid
 function isSupabaseConfigured() {
-    return SUPABASE_CONFIG.url && 
-           SUPABASE_CONFIG.anonKey && 
-           !SUPABASE_CONFIG.url.includes('YOUR_PROJECT_ID') && 
-           !SUPABASE_CONFIG.anonKey.includes('YOUR_SUPABASE_ANON_KEY');
+    return Boolean(
+        SUPABASE_CONFIG.url && 
+        SUPABASE_CONFIG.anonKey && 
+        !SUPABASE_CONFIG.url.includes('YOUR_PROJECT_ID')
+    );
 }
 
-// Inisialisasi Supabase Client jika SDK tersedia
-let supabase = null;
+// Inisialisasi Supabase Client (menggunakan supabaseClient agar tidak konflik dengan window.supabase)
+let supabaseClient = null;
 try {
-    if (typeof window.supabase !== 'undefined' && isSupabaseConfigured()) {
-        supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
-        console.log('%c[Supabase] Berhasil terhubung ke Supabase Cloud!', 'color: #0d766e; font-weight: bold;');
-    } else {
-        console.log('%c[Supabase] Berjalan dalam mode LocalStorage (Offline / Demo). Masukkan URL & Key Supabase di supabase.js untuk mengaktifkan cloud.', 'color: #f59e0b;');
+    if (typeof window !== 'undefined' && typeof window.supabase !== 'undefined' && typeof window.supabase.createClient === 'function' && isSupabaseConfigured()) {
+        supabaseClient = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
+        window.supabaseClient = supabaseClient;
+        console.log('%c[Supabase] Klien SDK Supabase berhasil diinisialisasi!', 'color: #0d766e; font-weight: bold;');
     }
 } catch (err) {
-    console.warn('[Supabase] Gagal menginisialisasi klien Supabase:', err);
+    console.warn('[Supabase] Warning saat inisialisasi SDK Supabase:', err.message);
+}
+
+// Helper Direct REST API (Bekerja 100% tanpa bergantung pada CDN SDK / file protocol)
+async function supabaseRest(endpoint, options = {}) {
+    if (!isSupabaseConfigured()) return null;
+
+    const fullUrl = `${SUPABASE_CONFIG.url}/rest/v1/${endpoint}`;
+    const headers = {
+        'apikey': SUPABASE_CONFIG.anonKey,
+        'Authorization': `Bearer ${SUPABASE_CONFIG.anonKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+        ...(options.headers || {})
+    };
+
+    try {
+        const response = await fetch(fullUrl, {
+            ...options,
+            headers
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errText}`);
+        }
+
+        const data = await response.json();
+        return data;
+    } catch (err) {
+        console.error(`[Supabase REST Error] ${endpoint}:`, err.message);
+        throw err;
+    }
+}
+
+// Notifikasi visual kecil saat sync database cloud
+function showCloudToast(message, isSuccess = true) {
+    try {
+        let toast = document.getElementById('supabase-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'supabase-toast';
+            toast.className = 'fixed bottom-5 right-5 z-[9999] px-4 py-2.5 rounded-xl text-xs font-semibold shadow-lg transition-all duration-300 transform translate-y-10 opacity-0 flex items-center space-x-2 pointer-events-none';
+            document.body.appendChild(toast);
+        }
+
+        if (isSuccess) {
+            toast.style.backgroundColor = '#0d766e';
+            toast.style.color = '#ffffff';
+            toast.innerHTML = `<svg class="w-4 h-4 text-emerald-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg><span>${message}</span>`;
+        } else {
+            toast.style.backgroundColor = '#ef4444';
+            toast.style.color = '#ffffff';
+            toast.innerHTML = `<svg class="w-4 h-4 text-white flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg><span>${message}</span>`;
+        }
+
+        toast.classList.remove('translate-y-10', 'opacity-0');
+        toast.classList.add('translate-y-0', 'opacity-100');
+
+        setTimeout(() => {
+            toast.classList.remove('translate-y-0', 'opacity-100');
+            toast.classList.add('translate-y-10', 'opacity-0');
+        }, 3500);
+    } catch (_) {}
 }
 
 // ========================================================
@@ -48,28 +99,76 @@ try {
  * Mengambil seluruh data pengguna dari Supabase (atau fallback LocalStorage)
  */
 async function fetchUsersFromDB() {
-    if (supabase) {
+    // 1. Coba lewat Supabase SDK Client
+    if (supabaseClient) {
         try {
-            const { data, error } = await supabase.from('users').select('*');
-            if (error) throw error;
-            if (data && data.length > 0) {
-                // Simpan cache ke local storage untuk cadangan offline
+            const { data, error } = await supabaseClient.from('users').select('*');
+            if (!error && Array.isArray(data) && data.length > 0) {
                 localStorage.setItem('DMS_LAUNDRY_USERS', JSON.stringify(data));
                 return data;
             }
         } catch (err) {
-            console.error('[Supabase] Gagal mengambil data users:', err.message);
+            console.warn('[Supabase] SDK fetch users gagal, mencoba REST API fallback...', err.message);
         }
     }
-    // Fallback ke LocalStorage
+
+    // 2. Fallback Direct REST API Supabase
+    try {
+        const data = await supabaseRest('users?select=*');
+        if (Array.isArray(data) && data.length > 0) {
+            localStorage.setItem('DMS_LAUNDRY_USERS', JSON.stringify(data));
+            return data;
+        }
+    } catch (err) {
+        console.warn('[Supabase] REST fetch users gagal, beralih ke cache lokal:', err.message);
+    }
+
+    // 3. Fallback LocalStorage Offline
     return JSON.parse(localStorage.getItem('DMS_LAUNDRY_USERS')) || [];
+}
+
+/**
+ * Autentikasi Pengguna langsung ke Supabase Cloud
+ */
+async function loginUserFromDB(usernameOrHp, password) {
+    const clean = usernameOrHp.trim();
+
+    // 1. Coba lewat SDK
+    if (supabaseClient) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('users')
+                .select('*')
+                .or(`username.eq."${clean}",hp.eq."${clean}"`)
+                .eq('password', password)
+                .maybeSingle();
+
+            if (!error && data) {
+                return data;
+            }
+        } catch (err) {
+            console.warn('[Supabase SDK Login error]:', err.message);
+        }
+    }
+
+    // 2. Coba lewat Direct REST API
+    try {
+        const query = `users?select=*&or=(username.eq.${clean},hp.eq.${clean})&password=eq.${encodeURIComponent(password)}`;
+        const list = await supabaseRest(query);
+        if (Array.isArray(list) && list.length > 0) {
+            return list[0];
+        }
+    } catch (err) {
+        console.warn('[Supabase REST Login error]:', err.message);
+    }
+
+    return null;
 }
 
 /**
  * Menyimpan pengguna baru ke Supabase & LocalStorage
  */
 async function insertUserToDB(userObj) {
-    // Pastikan field lengkap
     const payload = {
         username: userObj.hp || userObj.username,
         nama: userObj.nama,
@@ -78,19 +177,33 @@ async function insertUserToDB(userObj) {
         role: userObj.role || 'pelanggan'
     };
 
-    if (supabase) {
+    // 1. Coba lewat Supabase SDK Client
+    if (supabaseClient) {
         try {
-            const { data, error } = await supabase.from('users').insert([payload]).select();
+            const { data, error } = await supabaseClient.from('users').insert([payload]).select();
             if (error) throw error;
-            console.log('[Supabase] Pengguna baru tersimpan di cloud:', data);
+            console.log('[Supabase SDK] Pengguna baru tersimpan di cloud:', data);
+            showCloudToast('Akun berhasil disinkronkan ke Supabase Cloud!');
             return { success: true, data };
         } catch (err) {
-            console.error('[Supabase] Error insert user:', err.message);
-            return { success: false, error: err.message };
+            console.warn('[Supabase SDK] Gagal simpan user via SDK, mencoba REST...', err.message);
         }
     }
 
-    return { success: true, offline: true };
+    // 2. Fallback Direct REST API
+    try {
+        const data = await supabaseRest('users', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        console.log('[Supabase REST] Pengguna baru tersimpan di cloud:', data);
+        showCloudToast('Akun berhasil disinkronkan ke Supabase Cloud!');
+        return { success: true, data };
+    } catch (err) {
+        console.error('[Supabase Error] Gagal simpan user ke cloud:', err.message);
+        showCloudToast('Catatan: Akun tersimpan di lokal (Cloud offline / error)', false);
+        return { success: false, error: err.message };
+    }
 }
 
 // ========================================================
@@ -101,49 +214,68 @@ async function insertUserToDB(userObj) {
  * Mengambil seluruh transaksi dari Supabase (atau fallback LocalStorage)
  */
 async function fetchTransactionsFromDB() {
-    if (supabase) {
+    let rawData = null;
+
+    // 1. Coba lewat SDK
+    if (supabaseClient) {
         try {
-            const { data, error } = await supabase
+            const { data, error } = await supabaseClient
                 .from('transaksi')
                 .select('*')
                 .order('created_at', { ascending: false });
 
-            if (error) throw error;
-            if (data && data.length > 0) {
-                // Mapping kolom database (snake_case) ke format aplikasi (camelCase)
-                const mappedData = data.map(item => ({
-                    resi: item.resi,
-                    nama: item.nama,
-                    hp: item.hp,
-                    layanan: item.layanan,
-                    berat: parseFloat(item.berat) || 0,
-                    tipe: item.tipe,
-                    alamat: item.alamat || '',
-                    jam: item.jam || '',
-                    catatan: item.catatan || '',
-                    subtotal: parseFloat(item.subtotal) || 0,
-                    diskon: parseFloat(item.diskon) || 0,
-                    ongkir: parseFloat(item.ongkir) || 0,
-                    total: parseFloat(item.total) || 0,
-                    metode: item.metode,
-                    statusBayar: item.status_bayar,
-                    status: item.status,
-                    tanggal: item.tanggal
-                }));
-
-                localStorage.setItem('DMS_LAUNDRY_TRANSAKSI', JSON.stringify(mappedData));
-                return mappedData;
+            if (!error && Array.isArray(data)) {
+                rawData = data;
             }
         } catch (err) {
-            console.error('[Supabase] Gagal mengambil data transaksi:', err.message);
+            console.warn('[Supabase SDK] Fetch transaksi gagal, mencoba REST...', err.message);
         }
     }
-    // Fallback ke LocalStorage
+
+    // 2. Coba lewat REST Fallback jika SDK belum dapat data
+    if (!rawData) {
+        try {
+            const data = await supabaseRest('transaksi?select=*&order=created_at.desc');
+            if (Array.isArray(data)) {
+                rawData = data;
+            }
+        } catch (err) {
+            console.warn('[Supabase REST] Fetch transaksi gagal, beralih ke cache lokal:', err.message);
+        }
+    }
+
+    // 3. Mapping data dari snake_case (DB) ke camelCase (App)
+    if (rawData && rawData.length > 0) {
+        const mappedData = rawData.map(item => ({
+            resi: item.resi,
+            nama: item.nama,
+            hp: item.hp,
+            layanan: item.layanan,
+            berat: parseFloat(item.berat) || 0,
+            tipe: item.tipe,
+            alamat: item.alamat || '',
+            jam: item.jam || '',
+            catatan: item.catatan || '',
+            subtotal: parseFloat(item.subtotal) || 0,
+            diskon: parseFloat(item.diskon) || 0,
+            ongkir: parseFloat(item.ongkir) || 0,
+            total: parseFloat(item.total) || 0,
+            metode: item.metode,
+            statusBayar: item.status_bayar,
+            status: item.status,
+            tanggal: item.tanggal
+        }));
+
+        localStorage.setItem('DMS_LAUNDRY_TRANSAKSI', JSON.stringify(mappedData));
+        return mappedData;
+    }
+
+    // 4. Fallback ke LocalStorage
     return JSON.parse(localStorage.getItem('DMS_LAUNDRY_TRANSAKSI')) || [];
 }
 
 /**
- * Menyimpan transaksi baru ke Supabase
+ * Menyimpan transaksi baru ke Supabase Cloud
  */
 async function insertTransactionToDB(trxObj) {
     const payload = {
@@ -151,59 +283,109 @@ async function insertTransactionToDB(trxObj) {
         nama: trxObj.nama,
         hp: trxObj.hp,
         layanan: trxObj.layanan,
-        berat: trxObj.berat,
-        tipe: trxObj.tipe,
+        berat: trxObj.berat || 0,
+        tipe: trxObj.tipe || 'Order di Toko',
         alamat: trxObj.alamat || '',
         jam: trxObj.jam || '',
         catatan: trxObj.catatan || '',
-        subtotal: trxObj.subtotal,
+        subtotal: trxObj.subtotal || 0,
         diskon: trxObj.diskon || 0,
         ongkir: trxObj.ongkir || 0,
-        total: trxObj.total,
-        metode: trxObj.metode,
-        status_bayar: trxObj.statusBayar,
-        status: trxObj.status,
+        total: trxObj.total || 0,
+        metode: trxObj.metode || 'Tunai',
+        status_bayar: trxObj.statusBayar || 'Belum dibayar',
+        status: trxObj.status || 'Baru',
         tanggal: trxObj.tanggal || new Date().toISOString().split('T')[0]
     };
 
-    if (supabase) {
+    // 1. Coba lewat SDK
+    if (supabaseClient) {
         try {
-            const { data, error } = await supabase.from('transaksi').insert([payload]).select();
+            const { data, error } = await supabaseClient.from('transaksi').insert([payload]).select();
             if (error) throw error;
-            console.log('[Supabase] Transaksi berhasil tersimpan di cloud:', data);
+            console.log('[Supabase SDK] Transaksi tersimpan di cloud:', data);
+            showCloudToast(`Pesanan ${trxObj.resi} tersimpan di Supabase Cloud!`);
             return { success: true, data };
         } catch (err) {
-            console.error('[Supabase] Error insert transaksi:', err.message);
-            return { success: false, error: err.message };
+            console.warn('[Supabase SDK] Gagal simpan transaksi via SDK, mencoba REST...', err.message);
         }
     }
 
-    return { success: true, offline: true };
+    // 2. Fallback lewat REST API
+    try {
+        const data = await supabaseRest('transaksi', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        console.log('[Supabase REST] Transaksi tersimpan di cloud:', data);
+        showCloudToast(`Pesanan ${trxObj.resi} tersimpan di Supabase Cloud!`);
+        return { success: true, data };
+    } catch (err) {
+        console.error('[Supabase Error] Gagal simpan transaksi ke cloud:', err.message);
+        showCloudToast(`Catatan: Pesanan tersimpan lokal (Cloud offline / error)`, false);
+        return { success: false, error: err.message };
+    }
 }
 
 /**
- * Memperbarui status pesanan dan status pembayaran di Supabase
+ * Memperbarui status pesanan dan status pembayaran di Supabase Cloud
  */
 async function updateTransactionStatusInDB(resi, newStatus, newStatusBayar) {
     const updates = { status: newStatus };
     if (newStatusBayar) updates.status_bayar = newStatusBayar;
+    return await updateFullTransactionInDB(resi, updates);
+}
 
-    if (supabase) {
+/**
+ * Memperbarui data transaksi lengkap di Supabase Cloud
+ */
+async function updateFullTransactionInDB(resi, updates) {
+    const payload = {};
+    if (updates.status !== undefined) payload.status = updates.status;
+    if (updates.status_bayar !== undefined) payload.status_bayar = updates.status_bayar;
+    if (updates.statusBayar !== undefined) payload.status_bayar = updates.statusBayar;
+    if (updates.berat !== undefined) payload.berat = updates.berat;
+    if (updates.subtotal !== undefined) payload.subtotal = updates.subtotal;
+    if (updates.diskon !== undefined) payload.diskon = updates.diskon;
+    if (updates.ongkir !== undefined) payload.ongkir = updates.ongkir;
+    if (updates.total !== undefined) payload.total = updates.total;
+    if (updates.layanan !== undefined) payload.layanan = updates.layanan;
+    if (updates.tipe !== undefined) payload.tipe = updates.tipe;
+    if (updates.metode !== undefined) payload.metode = updates.metode;
+    if (updates.jam !== undefined) payload.jam = updates.jam;
+    if (updates.alamat !== undefined) payload.alamat = updates.alamat;
+    if (updates.catatan !== undefined) payload.catatan = updates.catatan;
+
+    // 1. Coba lewat SDK
+    if (supabaseClient) {
         try {
-            const { data, error } = await supabase
+            const { data, error } = await supabaseClient
                 .from('transaksi')
-                .update(updates)
+                .update(payload)
                 .eq('resi', resi)
                 .select();
 
             if (error) throw error;
-            console.log('[Supabase] Status transaksi di cloud diperbarui:', data);
+            console.log('[Supabase SDK] Data transaksi diperbarui di cloud:', data);
+            showCloudToast(`Pesanan ${resi} berhasil diperbarui di cloud!`);
             return { success: true, data };
         } catch (err) {
-            console.error('[Supabase] Error update status transaksi:', err.message);
-            return { success: false, error: err.message };
+            console.warn('[Supabase SDK] Gagal update transaksi via SDK, mencoba REST...', err.message);
         }
     }
 
-    return { success: true, offline: true };
+    // 2. Fallback lewat REST API
+    try {
+        const data = await supabaseRest(`transaksi?resi=eq.${encodeURIComponent(resi)}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload)
+        });
+        console.log('[Supabase REST] Data transaksi diperbarui di cloud:', data);
+        showCloudToast(`Pesanan ${resi} berhasil diperbarui di cloud!`);
+        return { success: true, data };
+    } catch (err) {
+        console.error('[Supabase Error] Gagal update transaksi ke cloud:', err.message);
+        showCloudToast(`Catatan: Update pesanan tersimpan lokal`, false);
+        return { success: false, error: err.message };
+    }
 }

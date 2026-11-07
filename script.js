@@ -1,3 +1,9 @@
+let dataset = JSON.parse(localStorage.getItem('DMS_LAUNDRY_TRANSAKSI')) || [
+    { resi: 'LD-0001', nama: 'Rina Melati', hp: '081234567890', layanan: 'Cuci Kiloan (3 kg)', berat: 3, tipe: 'Dijemput kurir', alamat: 'Jl. Melati No. 12', jam: 'Besok, 09.00-11.00', catatan: 'Pakaian kantor', subtotal: 21000, diskon: 0, ongkir: 3000, total: 24000, metode: 'Transfer', statusBayar: 'Lunas', status: 'Selesai', tanggal: '2026-11-01' },
+    { resi: 'LD-0002', nama: 'Budi Santoso', hp: '085712345678', layanan: 'Express (2 kg)', berat: 2, tipe: 'Antar sendiri ke toko', alamat: '', jam: 'Hari ini, 16.00 WIB', catatan: 'Jangan pakai pewangi kuat', subtotal: 20000, diskon: 0, ongkir: 0, total: 20000, metode: 'QRIS', statusBayar: 'Lunas', status: 'Diproses', tanggal: '2026-11-06' },
+    { resi: 'LD-0003', nama: 'Siti Aminah', hp: '081298765432', layanan: 'Cuci Kiloan (5 kg)', berat: 5, tipe: 'Order di Toko', alamat: '', jam: 'Lusa, 12.00 WIB', catatan: '', subtotal: 35000, diskon: 5000, ongkir: 0, total: 30000, metode: 'Tunai', statusBayar: 'Lunas', status: 'Diproses', tanggal: '2026-11-07' }
+];
+
 let users = JSON.parse(localStorage.getItem('DMS_LAUNDRY_USERS')) || [
     { nama: 'Rina Melati', hp: '081234567890', password: 'User123' },
     { nama: 'Budi Santoso', hp: '085712345678', password: 'User123' }
@@ -14,18 +20,24 @@ function saveUsers() { localStorage.setItem('DMS_LAUNDRY_USERS', JSON.stringify(
 // NAVIGASI SCREEN UTAMA (Landing, Auth, Dashboard)
 // ========================================================
 function showPublicLanding() {
-    document.getElementById('screen-public').classList.remove('hidden');
-    document.getElementById('screen-login').classList.add('hidden');
-    document.getElementById('screen-dashboard').classList.add('hidden');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const scPub = document.getElementById('screen-public');
+    const scLog = document.getElementById('screen-login');
+    const scDash = document.getElementById('screen-dashboard');
+    if (scPub) scPub.classList.remove('hidden');
+    if (scLog) scLog.classList.add('hidden');
+    if (scDash) scDash.classList.add('hidden');
+    if (typeof window.scrollTo === 'function') window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function showAuthScreen(tab = 'login') {
-    document.getElementById('screen-public').classList.add('hidden');
-    document.getElementById('screen-login').classList.remove('hidden');
-    document.getElementById('screen-dashboard').classList.add('hidden');
+    const scPub = document.getElementById('screen-public');
+    const scLog = document.getElementById('screen-login');
+    const scDash = document.getElementById('screen-dashboard');
+    if (scPub) scPub.classList.add('hidden');
+    if (scLog) scLog.classList.remove('hidden');
+    if (scDash) scDash.classList.add('hidden');
     switchAuthTab(tab);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (typeof window.scrollTo === 'function') window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function switchAuthTab(tab) {
@@ -109,9 +121,18 @@ async function handleLogin(e) {
     let authUser = null;
 
     // 1. Coba Autentikasi Cloud Supabase jika aktif
-    if (typeof supabase !== 'undefined' && supabase) {
+    if (typeof loginUserFromDB === 'function') {
         try {
-            const { data, error } = await supabase
+            const remoteUser = await loginUserFromDB(u, p);
+            if (remoteUser) {
+                authUser = { role: remoteUser.role, nama: remoteUser.nama, hp: remoteUser.hp, id: remoteUser.id };
+            }
+        } catch (err) {
+            console.warn('[Supabase] Gagal login via Supabase Cloud, mencoba fallback lokal:', err);
+        }
+    } else if (typeof supabaseClient !== 'undefined' && supabaseClient) {
+        try {
+            const { data, error } = await supabaseClient
                 .from('users')
                 .select('*')
                 .or(`username.eq."${u}",hp.eq."${u}"`)
@@ -122,7 +143,7 @@ async function handleLogin(e) {
                 authUser = { role: data.role, nama: data.nama, hp: data.hp, id: data.id };
             }
         } catch (err) {
-            console.warn('[Supabase] Gagal login via Supabase, beralih ke cache lokal:', err);
+            console.warn('[Supabase] Gagal login via Supabase Client:', err);
         }
     }
 
@@ -248,10 +269,116 @@ function dismissLoginErrorModal() {
     if (modal) modal.classList.add('hidden');
 }
 
-// Pop-up Logout (1 Detik)
+// ========================================================
+// MODAL DETAIL & KONFIRMASI RINGKAS (MUDAH DIBACA)
+// ========================================================
+let readableModalPrimaryAction = null;
+let readableModalSecondaryAction = null;
+
+function showReadableModal(options) {
+    const modal = document.getElementById('modal-readable-detail');
+    if (!modal) return;
+
+    const iconWrap = document.getElementById('popup-detail-icon-wrap');
+    const icon = document.getElementById('popup-detail-icon');
+    const title = document.getElementById('popup-detail-title');
+    const subtitle = document.getElementById('popup-detail-subtitle');
+    const card = document.getElementById('popup-detail-card');
+    const btnPri = document.getElementById('popup-detail-btn-pri');
+    const btnSec = document.getElementById('popup-detail-btn-sec');
+
+    if (icon) icon.className = options.icon || 'fa-solid fa-circle-check';
+    if (iconWrap) {
+        iconWrap.className = options.iconWrapClass || 'w-14 h-14 bg-teal-50 border border-teal-200 text-teal-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm';
+    }
+    if (title) title.innerText = options.title || 'Informasi';
+    if (subtitle) {
+        subtitle.innerText = options.subtitle || '';
+        subtitle.style.display = options.subtitle ? 'block' : 'none';
+    }
+
+    if (card && Array.isArray(options.rows)) {
+        card.innerHTML = options.rows.map(row => {
+            let valHtml = '';
+            if (row.isBadge) {
+                valHtml = `<span class="${row.badgeClass || 'px-2 py-0.5 rounded font-bold bg-teal-50 text-teal-800 border border-teal-200 text-[11px]'}">${row.value}</span>`;
+            } else if (row.highlight) {
+                valHtml = `<span class="font-extrabold text-teal-800 text-sm font-mono">${row.value}</span>`;
+            } else {
+                valHtml = `<span class="font-semibold text-slate-800 text-right max-w-[65%]">${row.value}</span>`;
+            }
+
+            return `
+                <div class="flex justify-between items-start gap-2 py-1.5 border-b border-slate-200/60 last:border-b-0">
+                    <span class="text-slate-500 font-medium">${row.label}</span>
+                    ${valHtml}
+                </div>
+            `;
+        }).join('');
+    }
+
+    // Tombol Utama (Primary)
+    if (btnPri) {
+        if (options.primaryBtn) {
+            btnPri.innerText = options.primaryBtn.text || 'Lanjut';
+            btnPri.className = options.primaryBtn.class || 'flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm';
+            btnPri.style.display = 'block';
+            readableModalPrimaryAction = options.primaryBtn.onClick || null;
+            btnPri.onclick = () => {
+                closeReadableDetailModal();
+                if (typeof readableModalPrimaryAction === 'function') readableModalPrimaryAction();
+            };
+        } else {
+            btnPri.style.display = 'none';
+        }
+    }
+
+    // Tombol Sekunder (Secondary)
+    if (btnSec) {
+        if (options.secondaryBtn) {
+            btnSec.innerText = options.secondaryBtn.text || 'Tutup';
+            btnSec.className = options.secondaryBtn.class || 'flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition';
+            btnSec.style.display = 'block';
+            readableModalSecondaryAction = options.secondaryBtn.onClick || null;
+            btnSec.onclick = () => {
+                closeReadableDetailModal();
+                if (typeof readableModalSecondaryAction === 'function') readableModalSecondaryAction();
+            };
+        } else {
+            btnSec.style.display = 'none';
+        }
+    }
+
+    modal.classList.remove('hidden');
+}
+
+function closeReadableDetailModal() {
+    const modal = document.getElementById('modal-readable-detail');
+    if (modal) modal.classList.add('hidden');
+}
+
+// Pop-up Logout (1 Detik) & Hapus Data Login
 function handleLogout() {
-    sessionStorage.removeItem('DMS_LAUNDRY_USER');
+    sessionStorage.clear();
     currentUser = null;
+
+    // Bersihkan seluruh data input login & register
+    const loginUser = document.getElementById('login-username');
+    const loginPass = document.getElementById('login-password');
+    if (loginUser) loginUser.value = '';
+    if (loginPass) loginPass.value = '';
+
+    const regNama = document.getElementById('reg-nama');
+    const regHp = document.getElementById('reg-hp');
+    const regPass = document.getElementById('reg-password');
+    const regConfirm = document.getElementById('reg-password-confirm');
+    if (regNama) regNama.value = '';
+    if (regHp) regHp.value = '';
+    if (regPass) regPass.value = '';
+    if (regConfirm) regConfirm.value = '';
+
+    // Bersihkan pencarian kasir jika ada
+    clearSelectedCustomer();
 
     const modal = document.getElementById('modal-logout-success');
     if (modal) modal.classList.remove('hidden');
@@ -282,9 +409,9 @@ function initDashboardView() {
         return;
     }
 
-    screenPublic.classList.add('hidden');
-    screenLogin.classList.add('hidden');
-    screenDashboard.classList.remove('hidden');
+    if (screenPublic) screenPublic.classList.add('hidden');
+    if (screenLogin) screenLogin.classList.add('hidden');
+    if (screenDashboard) screenDashboard.classList.remove('hidden');
 
     ['admin', 'pelanggan', 'owner'].forEach(r => {
         const el = document.getElementById(`view-${r}`);
@@ -292,27 +419,33 @@ function initDashboardView() {
     });
 
     if (currentUser.role === 'admin') {
-        document.getElementById('view-admin').classList.remove('hidden');
-        document.getElementById('admin-sidebar-name').innerText = currentUser.nama;
-        document.getElementById('kasir-name-display').innerText = currentUser.nama;
+        const vAdm = document.getElementById('view-admin');
+        if (vAdm) vAdm.classList.remove('hidden');
+        const sName = document.getElementById('admin-sidebar-name');
+        if (sName) sName.innerText = currentUser.nama;
+        const kName = document.getElementById('kasir-name-display');
+        if (kName) kName.innerText = currentUser.nama;
         switchAdminTab('input-order');
         refreshNextAutoResi();
         calculateKasirTotals();
         renderOnlineOrdersTable();
     } else if (currentUser.role === 'pelanggan') {
-        document.getElementById('view-pelanggan').classList.remove('hidden');
-        document.getElementById('pelanggan-name-nav').innerText = currentUser.nama;
+        const vPel = document.getElementById('view-pelanggan');
+        if (vPel) vPel.classList.remove('hidden');
+        const pName = document.getElementById('pelanggan-name-nav');
+        if (pName) pName.innerText = currentUser.nama;
         switchPelangganTab('buat');
+        initPelangganJadwal();
         renderPelangganOrders();
     } else if (currentUser.role === 'owner') {
-        document.getElementById('view-owner').classList.remove('hidden');
+        const vOwn = document.getElementById('view-owner');
+        if (vOwn) vOwn.classList.remove('hidden');
         switchOwnerTab('pemasukan');
     }
 
-    // Pastikan posisi scroll langsung berada di paling atas
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    document.body.scrollTop = 0;
-    document.documentElement.scrollTop = 0;
+    if (typeof window.scrollTo === 'function') {
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    }
 }
 
 // ========================================================
@@ -347,12 +480,34 @@ function trackPublicResi() {
         return;
     }
 
-    // Tentukan index tahapan: Dijemput (1), Dicuci (2), Disetrika (3), Diantar / Selesai (4)
+    // Tangani status Menunggu Konfirmasi
+    if (item.status === 'Menunggu Konfirmasi') {
+        detailBox.classList.remove('hidden');
+        detailBox.className = 'mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1';
+        detailBox.innerHTML = `
+            <div class="flex justify-between font-bold">
+                <span>${item.resi} · ${item.nama}</span>
+                <span class="text-amber-700">⏳ Menunggu Konfirmasi</span>
+            </div>
+            <div class="text-[11px] text-amber-800">
+                Layanan: ${item.layanan} (${item.berat} kg) · Pembayaran: ${item.metode} (${item.statusBayar})
+            </div>
+            <p class="text-[10px] text-amber-700 mt-1">Pembayaran pesanan Anda sedang diverifikasi oleh admin kami sebelum proses pencucian dimulai.</p>
+        `;
+        return;
+    }
+
+    // Sesuaikan teks tahapan pill sesuai tipe pesanan (Kurir vs Ambil Toko)
+    const isJemput = (item.tipe === 'Dijemput kurir');
+    if (pills[0]) pills[0].innerText = isJemput ? 'Dijemput' : 'Diterima';
+    if (pills[3]) pills[3].innerText = isJemput ? 'Diantar' : 'Siap Diambil';
+
+    // Tentukan index tahapan: Dijemput/Diterima (1), Dicuci (2), Disetrika (3), Diantar / Siap Diambil / Selesai (4)
     let stepIndex = 1;
     if (item.status === 'Baru' || item.status === 'Dijemput') stepIndex = 1;
     else if (item.status === 'Diproses' || item.status === 'Dicuci') stepIndex = 2;
     else if (item.status === 'Disetrika') stepIndex = 3;
-    else if (item.status === 'Siap diantar' || item.status === 'Selesai') stepIndex = 4;
+    else if (item.status === 'Siap diantar' || item.status === 'Siap diambil' || item.status === 'Selesai') stepIndex = 4;
 
     for (let i = 0; i < stepIndex; i++) {
         if (pills[i]) {
@@ -383,22 +538,38 @@ function switchAdminTab(tab) {
     const navOnline = document.getElementById('admin-nav-online');
 
     if (tab === 'input-order') {
-        tabInput.classList.remove('hidden');
-        tabOnline.classList.add('hidden');
-        navInput.className = 'flex-1 md:w-full text-left px-4 py-2.5 rounded-xl bg-teal-800 text-white transition flex items-center gap-2.5';
-        navOnline.className = 'flex-1 md:w-full text-left px-4 py-2.5 rounded-xl text-slate-300 hover:bg-navy-800 hover:text-white transition flex items-center justify-between';
+        if (tabInput) tabInput.classList.remove('hidden');
+        if (tabOnline) tabOnline.classList.add('hidden');
+        if (navInput) navInput.className = 'flex-1 md:w-full text-left px-4 py-2.5 rounded-xl bg-teal-800 text-white transition flex items-center gap-2.5';
+        if (navOnline) navOnline.className = 'flex-1 md:w-full text-left px-4 py-2.5 rounded-xl text-slate-300 hover:bg-navy-800 hover:text-white transition flex items-center justify-between';
     } else {
-        tabInput.classList.add('hidden');
-        tabOnline.classList.remove('hidden');
-        navOnline.className = 'flex-1 md:w-full text-left px-4 py-2.5 rounded-xl bg-teal-800 text-white transition flex items-center justify-between';
-        navInput.className = 'flex-1 md:w-full text-left px-4 py-2.5 rounded-xl text-slate-300 hover:bg-navy-800 hover:text-white transition flex items-center gap-2.5';
+        if (tabInput) tabInput.classList.add('hidden');
+        if (tabOnline) tabOnline.classList.remove('hidden');
+        if (navOnline) navOnline.className = 'flex-1 md:w-full text-left px-4 py-2.5 rounded-xl bg-teal-800 text-white transition flex items-center justify-between';
+        if (navInput) navInput.className = 'flex-1 md:w-full text-left px-4 py-2.5 rounded-xl text-slate-300 hover:bg-navy-800 hover:text-white transition flex items-center gap-2.5';
         renderOnlineOrdersTable();
     }
 }
 
+function getNextResiNumber() {
+    let maxNum = 0;
+    if (Array.isArray(dataset)) {
+        dataset.forEach(item => {
+            if (item && item.resi) {
+                const match = String(item.resi).match(/(\d+)/);
+                if (match) {
+                    const num = parseInt(match[1], 10);
+                    if (!isNaN(num) && num > maxNum) maxNum = num;
+                }
+            }
+        });
+    }
+    const nextVal = Math.max(maxNum + 1, (dataset ? dataset.length : 0) + 1);
+    return `LD-${String(nextVal).padStart(4, '0')}`;
+}
+
 function refreshNextAutoResi() {
-    const nextNum = String(dataset.length + 1).padStart(4, '0');
-    const autoResi = `LD-${nextNum}`;
+    const autoResi = getNextResiNumber();
     const el = document.getElementById('auto-resi-display');
     if (el) el.innerText = autoResi;
 }
@@ -410,26 +581,121 @@ function selectKasirRadio(group, value, element) {
     container.querySelectorAll('.radio-pill').forEach(p => p.classList.remove('active'));
     pill.classList.add('active');
 
-    if (group === 'metode') document.getElementById('kasir-metode-val').value = value;
+    if (group === 'metode') {
+        document.getElementById('kasir-metode-val').value = value;
+    }
     if (group === 'status-bayar') document.getElementById('kasir-status-bayar-val').value = value;
+}
+
+// Helper Waktu Express Otomatis: H+4 Jam setelah order
+function getExpressEstimatedTime() {
+    const now = new Date();
+    now.setHours(now.getHours() + 4);
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const timeStr = `${hh}:${mm}`;
+
+    const today = new Date();
+    if (now.getDate() === today.getDate()) {
+        return `Hari ini, ${timeStr} WIB (4 Jam Selesai)`;
+    } else {
+        return `Besok, ${timeStr} WIB (4 Jam Selesai)`;
+    }
+}
+
+// Logika Pilihan Hari & Jam Kasir dengan Tombol
+let kasirSelectedHari = 'Besok';
+let kasirSelectedJam = '17:00';
+
+function updateKasirEstimasiInput() {
+    const el = document.getElementById('kasir-estimasi');
+    if (el) el.value = `${kasirSelectedHari}, ${kasirSelectedJam} WIB`;
+}
+
+function selectKasirHari(hari, el) {
+    kasirSelectedHari = hari;
+    document.querySelectorAll('#group-kasir-hari .btn-kasir-hari').forEach(b => {
+        b.className = 'btn-kasir-hari px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-700 text-center font-medium transition text-[11px]';
+    });
+    if (el) {
+        el.className = 'btn-kasir-hari active px-2.5 py-1.5 rounded-lg border border-teal-600 bg-teal-50 text-teal-800 text-center font-bold transition text-[11px]';
+    }
+    updateKasirEstimasiInput();
+}
+
+function selectKasirJam(jam, el) {
+    kasirSelectedJam = jam;
+    document.querySelectorAll('#group-kasir-jam .btn-kasir-jam').forEach(b => {
+        b.className = 'btn-kasir-jam px-1.5 py-1.5 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-700 text-center font-medium transition text-[11px]';
+    });
+    if (el) {
+        el.className = 'btn-kasir-jam active px-1.5 py-1.5 rounded-lg border border-teal-600 bg-teal-50 text-teal-800 text-center font-bold transition text-[11px]';
+    }
+    updateKasirEstimasiInput();
+}
+
+function setKasirExpress4Jam() {
+    const el = document.getElementById('kasir-estimasi');
+    if (el) el.value = getExpressEstimatedTime();
+    showCloudToast('Estimasi Express otomatis diset: H+4 Jam!');
+}
+
+function selectKasirTipe(tipe, el) {
+    const hidden = document.getElementById('kasir-tipe-val');
+    if (hidden) hidden.value = tipe;
+
+    document.querySelectorAll('#kasir-tipe-group .btn-kasir-tipe').forEach(b => {
+        b.className = 'btn-kasir-tipe p-2.5 rounded-xl border border-slate-200 hover:border-teal-600 text-slate-700 text-xs font-medium text-left transition flex items-center gap-2';
+    });
+    if (el) {
+        el.className = 'btn-kasir-tipe active p-2.5 rounded-xl border border-teal-600 bg-teal-50 text-teal-800 text-xs font-bold text-left transition flex items-center gap-2';
+    }
+
+    const secAlamat = document.getElementById('section-kasir-alamat');
+    if (secAlamat) {
+        if (tipe === 'Dijemput kurir') {
+            secAlamat.classList.remove('hidden');
+        } else {
+            secAlamat.classList.add('hidden');
+        }
+    }
+
+    calculateKasirTotals();
 }
 
 function calculateKasirTotals() {
     const qtyKiloan = parseFloat(document.getElementById('qty-kiloan').value) || 0;
     const qtyExpress = parseFloat(document.getElementById('qty-express').value) || 0;
     const diskon = parseFloat(document.getElementById('kasir-diskon').value) || 0;
+    const tipe = document.getElementById('kasir-tipe-val')?.value || 'Order di Toko';
 
     const subKiloan = qtyKiloan * 7000;
     const subExpress = qtyExpress * 10000;
     const subtotal = subKiloan + subExpress;
-    const total = Math.max(0, subtotal - diskon);
+    const ongkir = (tipe === 'Dijemput kurir') ? 3000 : 0;
+    const total = Math.max(0, subtotal - diskon + ongkir);
 
-    document.getElementById('subtotal-kiloan-text').innerText = `Rp ${subKiloan.toLocaleString('id-ID')}`;
-    document.getElementById('subtotal-express-text').innerText = `Rp ${subExpress.toLocaleString('id-ID')}`;
-    document.getElementById('kasir-subtotal-display').innerText = `Rp ${subtotal.toLocaleString('id-ID')}`;
-    document.getElementById('kasir-total-display').innerText = `Rp ${total.toLocaleString('id-ID')}`;
+    const subKiloText = document.getElementById('subtotal-kiloan-text');
+    const subExpText = document.getElementById('subtotal-express-text');
+    const subDisp = document.getElementById('kasir-subtotal-display');
+    const ongDisp = document.getElementById('kasir-ongkir-display');
+    const totDisp = document.getElementById('kasir-total-display');
 
-    return { subtotal, diskon, total, qtyKiloan, qtyExpress };
+    if (subKiloText) subKiloText.innerText = `Rp ${subKiloan.toLocaleString('id-ID')}`;
+    if (subExpText) subExpText.innerText = `Rp ${subExpress.toLocaleString('id-ID')}`;
+    if (subDisp) subDisp.innerText = `Rp ${subtotal.toLocaleString('id-ID')}`;
+    if (ongDisp) ongDisp.innerText = `Rp ${ongkir.toLocaleString('id-ID')}`;
+    if (totDisp) totDisp.innerText = `Rp ${total.toLocaleString('id-ID')}`;
+
+    // Jika pesanan didominasi Express, otomatis set estimasi ke H+4 Jam
+    if (qtyExpress > 0 && qtyKiloan === 0) {
+        const estEl = document.getElementById('kasir-estimasi');
+        if (estEl && !estEl.value.includes('4 Jam')) {
+            estEl.value = getExpressEstimatedTime();
+        }
+    }
+
+    return { subtotal, diskon, ongkir, total, qtyKiloan, qtyExpress, tipe };
 }
 
 function autocompleteCustomer(val) {
@@ -450,46 +716,105 @@ function autocompleteCustomer(val) {
 }
 
 function clearSelectedCustomer() {
-    document.getElementById('kasir-cust-search').value = '';
-    document.getElementById('kasir-cust-name').value = '';
-    document.getElementById('kasir-cust-hp').value = '';
-    document.getElementById('kasir-cust-selected').classList.add('hidden');
+    const search = document.getElementById('kasir-cust-search');
+    const name = document.getElementById('kasir-cust-name');
+    const hp = document.getElementById('kasir-cust-hp');
+    const sel = document.getElementById('kasir-cust-selected');
+    if (search) search.value = '';
+    if (name) name.value = '';
+    if (hp) hp.value = '';
+    if (sel) sel.classList.add('hidden');
 }
 
-async function quickNewCustomer() {
-    const nama = prompt('Masukkan Nama Lengkap Pelanggan Baru:');
-    if (!nama) return;
-    const hp = prompt('Masukkan Nomor HP Pelanggan (08... / 62..., 10-13 digit):');
-    if (!hp) return;
+// Pop-up Tambah Pelanggan Baru di Kasir
+function openNewCustomerModal() {
+    const modal = document.getElementById('modal-pelanggan-baru');
+    if (!modal) return;
+    document.getElementById('modal-cust-nama').value = '';
+    document.getElementById('modal-cust-hp').value = '';
+    document.getElementById('modal-cust-alamat').value = '';
+    modal.classList.remove('hidden');
+    setTimeout(() => {
+        document.getElementById('modal-cust-nama').focus();
+    }, 100);
+}
 
-    const check = validateIndonesianPhone(hp);
-    if (!check.valid) {
-        alert(check.message);
+function closeNewCustomerModal() {
+    const modal = document.getElementById('modal-pelanggan-baru');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function submitNewCustomerModal(e) {
+    if (e) e.preventDefault();
+    const nama = document.getElementById('modal-cust-nama').value.trim();
+    const hp = document.getElementById('modal-cust-hp').value.trim();
+    const alamat = document.getElementById('modal-cust-alamat').value.trim();
+
+    if (!nama) {
+        triggerLoginError('Mohon masukkan nama lengkap pelanggan!', 'Data Belum Lengkap');
         return;
     }
 
-    const newUser = { nama, hp: check.cleanNumber, password: 'User123', role: 'pelanggan' };
-    users.push(newUser);
-    saveUsers();
-
-    if (typeof insertUserToDB === 'function') {
-        await insertUserToDB(newUser);
+    const check = validateIndonesianPhone(hp);
+    if (!check.valid) {
+        triggerLoginError(check.message, 'Format Nomor HP Salah');
+        return;
     }
 
+    // Cek apakah sudah terdaftar
+    const existing = users.find(u => u.hp === check.cleanNumber || (u.username && u.username === check.cleanNumber));
+    let isExisting = false;
+    if (existing) {
+        isExisting = true;
+    } else {
+        const newUser = { nama, hp: check.cleanNumber, alamat, password: 'User123', role: 'pelanggan' };
+        users.push(newUser);
+        saveUsers();
+
+        if (typeof insertUserToDB === 'function') {
+            await insertUserToDB(newUser);
+        }
+    }
+
+    // Set langsung ke form kasir
     document.getElementById('kasir-cust-name').value = nama;
     document.getElementById('kasir-cust-hp').value = check.cleanNumber;
     document.getElementById('kasir-cust-search').value = `${nama} (${check.cleanNumber})`;
     document.getElementById('cust-selected-name').innerText = nama;
     document.getElementById('cust-selected-hp').innerText = check.cleanNumber;
     document.getElementById('kasir-cust-selected').classList.remove('hidden');
+
+    closeNewCustomerModal();
+
+    showReadableModal({
+        icon: 'fa-solid fa-user-check text-teal-600',
+        iconWrapClass: 'w-14 h-14 bg-teal-50 border border-teal-200 text-teal-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm',
+        title: isExisting ? 'Pelanggan Terpilih!' : 'Pelanggan Baru Disimpan!',
+        subtitle: isExisting ? 'Nomor telepon pelanggan ini sudah terdaftar sebelumnya. Data langsung disiapkan di form kasir.' : 'Pelanggan baru berhasil didaftarkan dan langsung terpilih di kasir.',
+        rows: [
+            { label: 'Nama Pelanggan', value: nama },
+            { label: 'Nomor WhatsApp / HP', value: check.cleanNumber, isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-mono font-bold bg-slate-100 text-slate-800' },
+            { label: 'Alamat', value: alamat || '-' }
+        ],
+        primaryBtn: {
+            text: 'Lanjut Input Order',
+            onClick: () => {}
+        }
+    });
+}
+
+function quickNewCustomer() {
+    openNewCustomerModal();
 }
 
 async function handleKasirOrder(e) {
     e.preventDefault();
-    const { subtotal, diskon, total, qtyKiloan, qtyExpress } = calculateKasirTotals();
+    const { subtotal, diskon, ongkir, total, qtyKiloan, qtyExpress, tipe } = calculateKasirTotals();
 
-    if (qtyKiloan === 0 && qtyExpress === 0) {
-        triggerLoginError('Silakan masukkan jumlah berat/qty cucian (minimal 1 item).', 'Order Gagal');
+    // Validasi Minimal Order 1 kg
+    const totalBerat = qtyKiloan + qtyExpress;
+    if (totalBerat < 1) {
+        triggerLoginError('Minimal order cucian adalah 1 kg! Silakan masukkan berat cucian minimal 1 kg.', 'Order Gagal');
         return;
     }
 
@@ -501,8 +826,18 @@ async function handleKasirOrder(e) {
         hp = '081234567890';
     }
 
-    const nextNum = String(dataset.length + 1).padStart(4, '0');
-    const resi = `LD-${nextNum}`;
+    const alamatEl = document.getElementById('kasir-alamat');
+    const alamat = (alamatEl && alamatEl.value ? alamatEl.value : '').trim();
+
+    if (tipe === 'Dijemput kurir' && !alamat) {
+        triggerLoginError('Mohon isi alamat lengkap pengantaran / penjemputan kurir!', 'Alamat Kurir Wajib Diisi');
+        if (alamatEl) alamatEl.focus();
+        return;
+    }
+
+    const finalAlamat = (tipe === 'Dijemput kurir') ? alamat : (alamat || 'Gerai Toko DMS Laundry');
+    const initialStatus = (tipe === 'Dijemput kurir') ? 'Baru' : 'Diproses';
+    const resi = getNextResiNumber();
 
     let layananStr = [];
     if (qtyKiloan > 0) layananStr.push(`Cuci Kiloan (${qtyKiloan} kg)`);
@@ -514,17 +849,17 @@ async function handleKasirOrder(e) {
         hp,
         layanan: layananStr.join(', '),
         berat: qtyKiloan + qtyExpress,
-        tipe: 'Order di Toko',
-        alamat: '',
+        tipe,
+        alamat: finalAlamat,
         jam: document.getElementById('kasir-estimasi').value,
         catatan: '',
         subtotal,
         diskon,
-        ongkir: 0,
+        ongkir,
         total,
         metode: document.getElementById('kasir-metode-val').value,
         statusBayar: document.getElementById('kasir-status-bayar-val').value,
-        status: 'Diproses',
+        status: initialStatus,
         tanggal: new Date().toISOString().split('T')[0]
     };
 
@@ -541,78 +876,319 @@ async function handleKasirOrder(e) {
     document.getElementById('qty-kiloan').value = 0;
     document.getElementById('qty-express').value = 0;
     document.getElementById('kasir-diskon').value = 0;
+    if (alamatEl) alamatEl.value = '';
+    const defTipeBtn = document.querySelector('#kasir-tipe-group .btn-kasir-tipe');
+    if (defTipeBtn) selectKasirTipe('Order di Toko', defTipeBtn);
     calculateKasirTotals();
     refreshNextAutoResi();
 
-    // Cetak & Tampilkan Struk
-    showReceipt(item);
+    // Pop-up Ringkasan Order Kasir yang Mudah Dibaca
+    showReadableModal({
+        icon: 'fa-solid fa-file-invoice text-teal-600',
+        iconWrapClass: 'w-14 h-14 bg-teal-50 border border-teal-200 text-teal-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm',
+        title: 'Order Kasir Berhasil Disimpan!',
+        subtitle: 'Pesanan telah dicatat ke sistem & database. Anda dapat langsung mencetak struk kasir.',
+        rows: [
+            { label: 'Nomor Resi', value: item.resi, isBadge: true, badgeClass: 'px-2.5 py-1 rounded-md font-extrabold text-teal-800 bg-teal-50 border border-teal-300 font-mono text-xs' },
+            { label: 'Nama Pelanggan', value: `${item.nama} (${item.hp})` },
+            { label: 'Tipe Order', value: `${item.tipe} (${ongkir > 0 ? 'Ongkir Rp ' + ongkir.toLocaleString('id-ID') : 'Rp 0'})` },
+            { label: 'Layanan Cucian', value: item.layanan },
+            { label: 'Total Pembayaran', value: `Rp ${item.total.toLocaleString('id-ID')}`, highlight: true },
+            { label: 'Status Pembayaran', value: `${item.metode} (${item.statusBayar})`, isBadge: true, badgeClass: item.statusBayar === 'Lunas' ? 'px-2 py-0.5 rounded font-bold bg-emerald-50 text-emerald-700 border border-emerald-200' : 'px-2 py-0.5 rounded font-bold bg-rose-50 text-rose-700 border border-rose-200' },
+            { label: 'Estimasi Selesai', value: item.jam }
+        ],
+        primaryBtn: {
+            text: '🖨️ Cetak Struk Resi',
+            class: 'flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm',
+            onClick: () => {
+                showReceipt(item);
+            }
+        },
+        secondaryBtn: {
+            text: 'Input Order Baru',
+            onClick: () => {}
+        }
+    });
 }
 
-// Pesanan Online (Table List Page 14)
+// Kelola Semua Pesanan Admin (Order di Toko & Pesanan Online)
 let currentOnlineFilter = 'Semua';
 function filterOnlineOrders(filter, btn) {
     currentOnlineFilter = filter;
     document.querySelectorAll('.filter-pill').forEach(b => {
-        b.className = 'filter-pill px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition';
+        b.className = 'filter-pill px-3 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition';
     });
-    btn.className = 'filter-pill active px-3.5 py-1.5 rounded-full text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-600 transition';
+    if (btn) {
+        btn.className = 'filter-pill active px-3 py-1.5 rounded-full text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-600 transition';
+    }
     renderOnlineOrdersTable();
 }
 
 function renderOnlineOrdersTable() {
     const tbody = document.getElementById('tabel-online-body');
-    if (!tbody) return;
+    const cardsContainer = document.getElementById('tabel-online-cards');
+    if (!tbody && !cardsContainer) return;
 
-    let items = dataset.filter(x => x.tipe.toLowerCase().includes('kurir') || x.tipe.toLowerCase().includes('online') || x.status === 'Baru');
-    document.getElementById('badge-online-count').innerText = dataset.filter(x => x.status === 'Baru').length;
+    // Counter total semua pesanan
+    const totalCount = dataset.length;
+    const countAllEl = document.getElementById('count-all-orders');
+    if (countAllEl) countAllEl.innerText = totalCount;
 
-    if (currentOnlineFilter !== 'Semua') {
+    const baruCount = dataset.filter(x => x.status === 'Baru').length;
+    const badgeCount = document.getElementById('badge-online-count');
+    if (badgeCount) badgeCount.innerText = baruCount;
+
+    let items = [...dataset];
+
+    if (currentOnlineFilter === 'Order di Toko') {
+        items = items.filter(x => x.tipe === 'Order di Toko');
+    } else if (currentOnlineFilter === 'Dijemput kurir') {
+        items = items.filter(x => x.tipe === 'Dijemput kurir');
+    } else if (currentOnlineFilter === 'Antar sendiri ke toko') {
+        items = items.filter(x => x.tipe === 'Antar sendiri ke toko');
+    } else if (currentOnlineFilter === 'Online') {
+        items = items.filter(x => x.tipe === 'Dijemput kurir' || x.tipe === 'Antar sendiri ke toko');
+    } else if (currentOnlineFilter === 'Menunggu Konfirmasi') {
+        items = items.filter(x => x.status === 'Menunggu Konfirmasi' || x.statusBayar === 'Menunggu Konfirmasi');
+    } else if (currentOnlineFilter === 'Siap diantar') {
+        items = items.filter(x => x.status === 'Siap diantar' || x.status === 'Siap diambil');
+    } else if (currentOnlineFilter !== 'Semua') {
         items = items.filter(x => x.status === currentOnlineFilter);
     }
 
     if (items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400">Tidak ada pesanan online pada kategori ini.</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400">Tidak ada pesanan pada kategori filter "${currentOnlineFilter}".</td></tr>`;
+        if (cardsContainer) cardsContainer.innerHTML = `<div class="p-8 text-center text-slate-400 text-xs">Tidak ada pesanan pada kategori filter "${currentOnlineFilter}".</div>`;
         return;
     }
 
-    tbody.innerHTML = items.map(item => {
+    // Helper untuk generate elemen baris dan kartu
+    const renderedItems = items.map(item => {
         // Status Badges
         let statusBadge = '';
-        if (item.status === 'Baru') statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">Baru</span>`;
-        else if (item.status === 'Dijemput') statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">Dijemput</span>`;
-        else if (item.status === 'Diproses' || item.status === 'Dicuci') statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-teal-50 text-teal-700 border border-teal-200">Diproses</span>`;
-        else statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">${item.status}</span>`;
+        if (item.status === 'Menunggu Konfirmasi') {
+            statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-300 animate-pulse inline-flex items-center gap-1"><i class="fa-solid fa-clock"></i>Menunggu Konfirmasi</span>`;
+        } else if (item.status === 'Baru') {
+            statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 inline-flex items-center gap-1"><i class="fa-solid fa-sparkles"></i>Baru</span>`;
+        } else if (item.status === 'Dijemput') {
+            statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200 inline-flex items-center gap-1"><i class="fa-solid fa-motorcycle"></i>Dijemput</span>`;
+        } else if (item.status === 'Diproses' || item.status === 'Dicuci') {
+            statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-teal-50 text-teal-700 border border-teal-200 inline-flex items-center gap-1"><i class="fa-solid fa-jug-detergent"></i>Diproses</span>`;
+        } else if (item.status === 'Siap diantar') {
+            statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 inline-flex items-center gap-1"><i class="fa-solid fa-truck-fast"></i>Siap diantar</span>`;
+        } else if (item.status === 'Siap diambil') {
+            statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 inline-flex items-center gap-1"><i class="fa-solid fa-store"></i>Siap diambil</span>`;
+        } else {
+            statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1"><i class="fa-solid fa-check"></i>${item.status}</span>`;
+        }
 
         // Payment Badges
         let bayarBadge = item.statusBayar === 'Lunas' ?
-            `<span class="text-emerald-700 font-semibold">Lunas</span>` :
-            `<span class="text-rose-600 font-semibold">Belum dibayar</span>`;
+            `<span class="text-emerald-700 font-bold">Lunas</span>` :
+            item.statusBayar === 'Menunggu Konfirmasi' ?
+            `<span class="text-amber-700 font-bold">Menunggu Konfirmasi</span>` :
+            `<span class="text-rose-600 font-bold">Belum dibayar</span>`;
 
-        // Action Button
-        let actionBtn = '';
-        if (item.status === 'Baru') {
-            actionBtn = `<button onclick="advanceOrderStatus('${item.resi}', 'Dijemput')" class="px-3.5 py-1.5 rounded-lg bg-teal-700 text-white font-semibold hover:bg-teal-800 transition">Terima pesanan</button>`;
-        } else if (item.status === 'Dijemput') {
-            actionBtn = `<button onclick="advanceOrderStatus('${item.resi}', 'Diproses')" class="px-3.5 py-1.5 rounded-lg bg-teal-700 text-white font-semibold hover:bg-teal-800 transition">Update status</button>`;
-        } else if (item.status === 'Diproses') {
-            actionBtn = `<button onclick="advanceOrderStatus('${item.resi}', 'Selesai')" class="px-3.5 py-1.5 rounded-lg bg-teal-700 text-white font-semibold hover:bg-teal-800 transition">Update status</button>`;
+        // Tipe Badge (Toko vs Antar Toko vs Jemput Kurir)
+        let tipeBadge = '';
+        if (item.tipe === 'Order di Toko') {
+            tipeBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200 inline-flex items-center gap-1"><i class="fa-solid fa-shop text-[9px]"></i>Order Toko</span>`;
+        } else if (item.tipe === 'Antar sendiri ke toko') {
+            tipeBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 inline-flex items-center gap-1"><i class="fa-solid fa-store text-[9px]"></i>Antar Toko</span>`;
         } else {
-            actionBtn = `<button onclick="showReceiptByResi('${item.resi}')" class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold transition">Struk</button>`;
+            tipeBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-teal-50 text-teal-700 border border-teal-200 inline-flex items-center gap-1"><i class="fa-solid fa-motorcycle text-[9px]"></i>${item.tipe || 'Dijemput kurir'}</span>`;
         }
 
-        return `
-            <tr class="hover:bg-slate-50 transition">
+        // Action Buttons: Sesuai Tipe Order (Kurir vs Ambil Toko)
+        const isJemput = (item.tipe === 'Dijemput kurir');
+        let actionBtn = `
+            <div class="flex items-center justify-center gap-1.5 flex-wrap">
+                <button onclick="openAdminUpdateModal('${item.resi}')" title="Update Pesanan" class="px-2.5 py-1.5 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 font-bold text-xs transition flex items-center gap-1 shadow-sm">
+                    <i class="fa-solid fa-pen-to-square"></i> Update
+                </button>
+        `;
+
+        if (item.status === 'Menunggu Konfirmasi') {
+            actionBtn += `<button onclick="confirmAdminPayment('${item.resi}')" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700 transition text-xs flex items-center gap-1 shadow-sm"><i class="fa-solid fa-check"></i> Konfirmasi</button>`;
+        } else if (item.status === 'Baru') {
+            if (isJemput) {
+                actionBtn += `<button onclick="advanceOrderStatus('${item.resi}', 'Dijemput')" class="px-2.5 py-1.5 rounded-lg bg-teal-700 text-white font-semibold hover:bg-teal-800 transition text-xs flex items-center gap-1"><i class="fa-solid fa-motorcycle text-[10px]"></i> Jemput</button>`;
+            } else {
+                actionBtn += `<button onclick="advanceOrderStatus('${item.resi}', 'Diproses')" class="px-2.5 py-1.5 rounded-lg bg-teal-700 text-white font-semibold hover:bg-teal-800 transition text-xs flex items-center gap-1"><i class="fa-solid fa-shop text-[10px]"></i> Terima</button>`;
+            }
+        } else if (item.status === 'Dijemput') {
+            actionBtn += `<button onclick="advanceOrderStatus('${item.resi}', 'Diproses')" class="px-2.5 py-1.5 rounded-lg bg-teal-700 text-white font-semibold hover:bg-teal-800 transition text-xs flex items-center gap-1"><i class="fa-solid fa-jug-detergent text-[10px]"></i> Proses Cuci</button>`;
+        } else if (item.status === 'Diproses') {
+            const nextReady = isJemput ? 'Siap diantar' : 'Siap diambil';
+            actionBtn += `<button onclick="advanceOrderStatus('${item.resi}', '${nextReady}')" class="px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition text-xs flex items-center gap-1">${isJemput ? '<i class="fa-solid fa-truck-fast text-[10px]"></i> Siap Antar' : '<i class="fa-solid fa-store text-[10px]"></i> Siap Ambil'}</button>`;
+        } else if (item.status === 'Siap diantar' || item.status === 'Siap diambil') {
+            actionBtn += `<button onclick="advanceOrderStatus('${item.resi}', 'Selesai')" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition text-xs flex items-center gap-1"><i class="fa-solid fa-circle-check text-[10px]"></i> Selesai</button>`;
+        }
+        actionBtn += `<button onclick="showReceiptByResi('${item.resi}')" title="Cetak Struk" class="px-2 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 transition text-xs"><i class="fa-solid fa-print"></i></button>`;
+        actionBtn += `</div>`;
+
+        return { item, statusBadge, bayarBadge, tipeBadge, actionBtn };
+    });
+
+    // Render Table Rows (Desktop)
+    if (tbody) {
+        tbody.innerHTML = renderedItems.map(({ item, statusBadge, bayarBadge, tipeBadge, actionBtn }) => `
+            <tr class="hover:bg-slate-50 transition border-b border-slate-100">
                 <td class="p-4 font-bold text-teal-800 font-mono">${item.resi}</td>
-                <td class="p-4 font-semibold text-slate-900">${item.nama}</td>
-                <td class="p-4 text-slate-600">${item.layanan}</td>
-                <td class="p-4 text-slate-600">${item.metode} · ${bayarBadge}</td>
-                <td class="p-4 text-slate-600">${item.tipe}</td>
+                <td class="p-4">
+                    <div class="font-semibold text-slate-900">${item.nama}</div>
+                    <div class="text-[11px] text-slate-400 font-mono">${item.hp || '-'}</div>
+                </td>
+                <td class="p-4 whitespace-nowrap">${tipeBadge}</td>
+                <td class="p-4 text-slate-700">
+                    <div class="font-medium">${item.layanan}</div>
+                    <div class="text-[11px] text-slate-400 font-mono">${item.berat} kg</div>
+                </td>
+                <td class="p-4 text-slate-700">
+                    <div class="font-bold text-slate-900">Rp ${(item.total || 0).toLocaleString('id-ID')}</div>
+                    <div class="text-[11px] text-slate-500">${item.metode} · ${bayarBadge}</div>
+                </td>
                 <td class="p-4 text-slate-600 font-mono text-[11px]">${item.jam || '-'}</td>
-                <td class="p-4">${statusBadge}</td>
+                <td class="p-4 whitespace-nowrap">${statusBadge}</td>
                 <td class="p-4 text-center">${actionBtn}</td>
             </tr>
-        `;
-    }).join('');
+        `).join('');
+    }
+
+    // Render Cards View (Mobile)
+    if (cardsContainer) {
+        cardsContainer.innerHTML = renderedItems.map(({ item, statusBadge, bayarBadge, tipeBadge, actionBtn }) => `
+            <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+                <div class="flex justify-between items-center">
+                    <span class="font-extrabold text-teal-800 font-mono text-sm">${item.resi}</span>
+                    ${statusBadge}
+                </div>
+                <div class="flex justify-between items-start text-xs border-b border-slate-100 pb-2.5">
+                    <div>
+                        <div class="font-bold text-slate-900 text-sm">${item.nama}</div>
+                        <div class="text-[11px] text-slate-400 font-mono mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1"></i>${item.hp || '-'}</div>
+                    </div>
+                    <div class="text-right">
+                        ${tipeBadge}
+                    </div>
+                </div>
+                <div class="text-xs text-slate-600 space-y-1.5">
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Layanan Cucian:</span>
+                        <span class="font-semibold text-slate-800">${item.layanan} (${item.berat} kg)</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Jadwal / Estimasi:</span>
+                        <span class="font-semibold text-slate-800 font-mono text-[11px]">${item.jam || '-'}</span>
+                    </div>
+                    <div class="flex justify-between items-center pt-1 border-t border-slate-50">
+                        <span class="text-slate-400">Total Biaya:</span>
+                        <span class="font-extrabold text-teal-800 text-sm">Rp ${(item.total || 0).toLocaleString('id-ID')} · ${bayarBadge}</span>
+                    </div>
+                </div>
+                <div class="pt-2 border-t border-slate-100">
+                    ${actionBtn}
+                </div>
+            </div>
+        `).join('');
+    }
+}
+
+// Modal Admin Update Pesanan (Order di Toko & Online)
+function openAdminUpdateModal(resi) {
+    const item = dataset.find(x => x.resi === resi);
+    if (!item) return;
+
+    document.getElementById('update-modal-resi').innerText = item.resi;
+    document.getElementById('update-modal-resi-val').value = item.resi;
+    document.getElementById('update-modal-nama').innerText = `${item.nama} (${item.hp || '-'})`;
+    const tipeSelect = document.getElementById('update-modal-tipe');
+    if (tipeSelect) tipeSelect.value = item.tipe || 'Order di Toko';
+    document.getElementById('update-modal-status').value = item.status || 'Diproses';
+    document.getElementById('update-modal-status-bayar').value = item.statusBayar || 'Belum dibayar';
+    document.getElementById('update-modal-metode').value = item.metode || 'Tunai';
+    document.getElementById('update-modal-berat').value = item.berat || 1;
+    document.getElementById('update-modal-total').value = item.total || 0;
+    document.getElementById('update-modal-jam').value = item.jam || '';
+    document.getElementById('update-modal-catatan').value = item.catatan || '';
+
+    const modal = document.getElementById('modal-admin-update-pesanan');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeAdminUpdateModal() {
+    const modal = document.getElementById('modal-admin-update-pesanan');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function submitAdminUpdateModal(e) {
+    if (e) e.preventDefault();
+    const resi = document.getElementById('update-modal-resi-val').value;
+    const item = dataset.find(x => x.resi === resi);
+    if (!item) return;
+
+    const newTipe = document.getElementById('update-modal-tipe') ? document.getElementById('update-modal-tipe').value : item.tipe;
+    const newStatus = document.getElementById('update-modal-status').value;
+    const newStatusBayar = document.getElementById('update-modal-status-bayar').value;
+    const newMetode = document.getElementById('update-modal-metode').value;
+    const newBerat = parseFloat(document.getElementById('update-modal-berat').value) || item.berat;
+    const newTotal = parseFloat(document.getElementById('update-modal-total').value) || item.total;
+    const newJam = document.getElementById('update-modal-jam').value.trim();
+    const newCatatan = document.getElementById('update-modal-catatan').value.trim();
+
+    // Update objek di dataset lokal
+    item.tipe = newTipe;
+    item.status = newStatus;
+    item.statusBayar = newStatusBayar;
+    item.metode = newMetode;
+    item.berat = newBerat;
+    item.total = newTotal;
+    item.jam = newJam;
+    item.catatan = newCatatan;
+
+    saveData();
+    renderOnlineOrdersTable();
+
+    // Jika owner sedang buka laporan bulanan, update juga rekapnya
+    if (typeof renderOwnerStats === 'function') renderOwnerStats();
+    if (typeof renderOwnerDetailedReport === 'function') renderOwnerDetailedReport();
+
+    // Sinkronkan update ke Supabase Cloud
+    if (typeof updateFullTransactionInDB === 'function') {
+        await updateFullTransactionInDB(resi, {
+            status: newStatus,
+            status_bayar: newStatusBayar,
+            tipe: newTipe,
+            metode: newMetode,
+            berat: newBerat,
+            total: newTotal,
+            jam: newJam,
+            catatan: newCatatan
+        });
+    }
+
+    closeAdminUpdateModal();
+    showCloudToast(`Pesanan ${resi} berhasil diperbarui!`);
+
+    showReadableModal({
+        icon: 'fa-solid fa-pen-to-square text-teal-600',
+        iconWrapClass: 'w-14 h-14 bg-teal-50 border border-teal-200 text-teal-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm',
+        title: 'Perubahan Pesanan Disimpan!',
+        subtitle: `Data pesanan ${resi} telah diperbarui di sistem kasir & Supabase Cloud.`,
+        rows: [
+            { label: 'Nomor Resi', value: resi, isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-mono font-bold bg-teal-50 text-teal-800 border border-teal-300' },
+            { label: 'Tipe Order', value: newTipe },
+            { label: 'Status Pengerjaan', value: newStatus, isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-teal-50 text-teal-700 border border-teal-200' },
+            { label: 'Status Pembayaran', value: `${newMetode} (${newStatusBayar})`, isBadge: true, badgeClass: newStatusBayar === 'Lunas' ? 'px-2 py-0.5 rounded font-bold bg-emerald-50 text-emerald-700 border border-emerald-200' : 'px-2 py-0.5 rounded font-bold bg-amber-50 text-amber-700 border border-amber-200' },
+            { label: 'Berat Cucian', value: `${newBerat} kg` },
+            { label: 'Total Biaya', value: `Rp ${newTotal.toLocaleString('id-ID')}`, highlight: true },
+            { label: 'Jadwal / Estimasi', value: newJam || '-' }
+        ],
+        primaryBtn: {
+            text: 'Tutup & Lihat Pesanan',
+            onClick: () => {}
+        }
+    });
 }
 
 async function advanceOrderStatus(resi, newStatus) {
@@ -627,6 +1203,45 @@ async function advanceOrderStatus(resi, newStatus) {
     if (typeof updateTransactionStatusInDB === 'function') {
         await updateTransactionStatusInDB(resi, newStatus, item.statusBayar);
     }
+}
+
+// Konfirmasi Pembayaran oleh Admin (Verifikasi Status Pesanan)
+async function confirmAdminPayment(resi) {
+    const item = dataset.find(x => x.resi === resi);
+    if (!item) return;
+
+    item.status = 'Diproses';
+    item.statusBayar = 'Lunas';
+    saveData();
+    renderOnlineOrdersTable();
+
+    if (typeof renderOwnerStats === 'function') renderOwnerStats();
+    if (typeof renderOwnerDetailedReport === 'function') renderOwnerDetailedReport();
+
+    if (typeof updateTransactionStatusInDB === 'function') {
+        await updateTransactionStatusInDB(resi, 'Diproses', 'Lunas');
+    }
+
+    showCloudToast(`Pembayaran pesanan ${resi} telah dikonfirmasi Lunas! Pesanan kini Diproses.`);
+
+    showReadableModal({
+        icon: 'fa-solid fa-circle-check text-emerald-600',
+        iconWrapClass: 'w-14 h-14 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm',
+        title: 'Pembayaran Telah Dikonfirmasi!',
+        subtitle: `Status pembayaran pesanan ${resi} telah diverifikasi Lunas dan pesanan kini masuk antrean Diproses.`,
+        rows: [
+            { label: 'Nomor Resi', value: item.resi, isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-mono font-bold bg-teal-50 text-teal-800 border border-teal-300' },
+            { label: 'Pelanggan', value: item.nama },
+            { label: 'Layanan Cucian', value: item.layanan },
+            { label: 'Status Pengerjaan', value: item.status, isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-teal-50 text-teal-700 border border-teal-200' },
+            { label: 'Status Pembayaran', value: 'Lunas', isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-emerald-50 text-emerald-700 border border-emerald-200' },
+            { label: 'Total Masuk Omset', value: `Rp ${item.total.toLocaleString('id-ID')}`, highlight: true }
+        ],
+        primaryBtn: {
+            text: 'Tutup & Lihat Pesanan',
+            onClick: () => {}
+        }
+    });
 }
 
 // ========================================================
@@ -652,6 +1267,94 @@ function switchPelangganTab(tab) {
     }
 }
 
+// Helper Waktu Penjemputan & Pengantaran Express (4 Jam Selesai)
+function getExpressPickupDeliveryTimes(tipe = 'Dijemput kurir') {
+    const now = new Date();
+    const isJemput = (tipe === 'Dijemput kurir');
+
+    // Penjemputan segera 30-45 menit dari waktu pemesanan jika dijemput kurir
+    const pickupDate = new Date(now.getTime() + 30 * 60000);
+    const pickupH = String(pickupDate.getHours()).padStart(2, '0');
+    const pickupM = String(pickupDate.getMinutes()).padStart(2, '0');
+    const jamJemput = isJemput 
+        ? `Hari ini, pukul ${pickupH}:${pickupM} WIB (Segera ~30 Menit)`
+        : `Hari ini, bawa langsung ke toko (Buka s/d 20:00)`;
+
+    // Pengantaran/selesai: H+4 Jam setelah order
+    const delivDate = new Date(now.getTime() + 4 * 3600000);
+    const delivH = String(delivDate.getHours()).padStart(2, '0');
+    const delivM = String(delivDate.getMinutes()).padStart(2, '0');
+    const isToday = delivDate.getDate() === now.getDate();
+    const dayLabel = isToday ? 'Hari ini' : 'Besok';
+    const jamAntar = `${dayLabel}, pukul ${delivH}:${delivM} WIB (4 Jam Selesai)`;
+
+    const combined = isJemput 
+        ? `Diantar pada: ${jamAntar} (Jemput: ${jamJemput})`
+        : `Ambil pada: ${jamAntar}`;
+
+    return { jamJemput, jamAntar, combined };
+}
+
+// Perbarui Teks Jadwal berdasarkan Metode Pengambilan (Antar sendiri -> 'Ambil pada', Kurir -> 'Tentukan hari pengantaran')
+function updateJadwalLabels(pengambilanVal) {
+    const isAntarSendiri = (pengambilanVal === 'Antar sendiri ke toko');
+
+    const titleEl = document.getElementById('label-jadwal-title');
+    const subtitleEl = document.getElementById('label-jadwal-subtitle');
+    const tglLabelEl = document.getElementById('label-jadwal-tgl');
+    const jamLabelEl = document.getElementById('label-jadwal-jam');
+    const infoEl = document.getElementById('label-jadwal-info');
+    const quickDaysEl = document.getElementById('pelanggan-quick-days');
+
+    // Express elements
+    const expLabelJemput = document.getElementById('express-label-jemput');
+    const expDescJemput = document.getElementById('express-desc-jemput');
+    const expLabelAntar = document.getElementById('express-label-antar');
+    const expDescAntar = document.getElementById('express-desc-antar');
+
+    if (isAntarSendiri) {
+        // Mode Antar Sendiri -> Teks "Ambil pada"
+        if (titleEl) titleEl.innerText = 'Ambil pada';
+        if (subtitleEl) subtitleEl.innerText = 'Pilih jadwal Anda mengambil pakaian bersih di gerai toko DMS Laundry (Minimal H+1)';
+        if (tglLabelEl) tglLabelEl.innerText = 'Ambil pada Hari / Tanggal (Min. H+1)';
+        if (jamLabelEl) jamLabelEl.innerText = 'Ambil pada Jam';
+        if (infoEl) infoEl.innerHTML = '<i class="fa-solid fa-store text-teal-600"></i> Silakan datang ke gerai DMS Laundry untuk mengambil pakaian bersih pada waktu ini';
+
+        if (quickDaysEl) {
+            const btns = quickDaysEl.querySelectorAll('.btn-quick-day');
+            if (btns[0]) btns[0].innerText = 'Ambil Besok (H+1)';
+            if (btns[1]) btns[1].innerText = 'Ambil Lusa (H+2)';
+            if (btns[2]) btns[2].innerText = 'Ambil H+3';
+        }
+
+        if (expLabelJemput) expLabelJemput.innerHTML = '<i class="fa-solid fa-store text-amber-600"></i> Serah Terima di Toko:';
+        if (expDescJemput) expDescJemput.innerText = 'Bawa cucian Anda langsung ke gerai toko DMS Laundry';
+        if (expLabelAntar) expLabelAntar.innerHTML = '<i class="fa-solid fa-clock text-emerald-600"></i> Ambil pada (4 Jam Selesai):';
+        if (expDescAntar) expDescAntar.innerText = 'Pakaian bersih rapi siap Anda ambil di toko dalam 4 jam';
+    } else {
+        // Mode Dijemput kurir -> Tentukan hari pengantaran
+        if (titleEl) titleEl.innerText = 'Tentukan Hari Pengantaran';
+        if (subtitleEl) subtitleEl.innerText = 'Tentukan hari dan jam pengantaran oleh kurir ke alamat Anda (Minimal H+1)';
+        if (tglLabelEl) tglLabelEl.innerText = 'Tentukan Hari / Tanggal Pengantaran (Min. H+1)';
+        if (jamLabelEl) jamLabelEl.innerText = 'Tentukan Jam Pengantaran Kurir';
+        if (infoEl) infoEl.innerHTML = '<i class="fa-solid fa-truck-fast text-teal-600"></i> Kurir akan mengantarkan cucian ke rumah Anda sesuai jam ini';
+
+        if (quickDaysEl) {
+            const btns = quickDaysEl.querySelectorAll('.btn-quick-day');
+            if (btns[0]) btns[0].innerText = 'Diantar Besok (H+1)';
+            if (btns[1]) btns[1].innerText = 'Diantar Lusa (H+2)';
+            if (btns[2]) btns[2].innerText = 'Diantar H+3';
+        }
+
+        if (expLabelJemput) expLabelJemput.innerHTML = '<i class="fa-solid fa-truck-pickup text-amber-600"></i> Jam Penjemputan Kurir:';
+        if (expDescJemput) expDescJemput.innerText = 'Kurir segera datang ke alamat Anda (~30 Menit)';
+        if (expLabelAntar) expLabelAntar.innerHTML = '<i class="fa-solid fa-house text-emerald-600"></i> Tentukan Hari & Jam Pengantaran (Selesai):';
+        if (expDescAntar) expDescAntar.innerText = 'H+4 Jam langsung diantar kembali oleh kurir';
+    }
+
+    updatePelangganJadwalFromInputs();
+}
+
 function selectPelangganRadio(group, val, element) {
     const pill = element.closest('.radio-pill');
     if (!pill) return;
@@ -661,51 +1364,243 @@ function selectPelangganRadio(group, val, element) {
 
     if (group === 'layanan') {
         document.getElementById('pelanggan-layanan-val').value = val;
+        const jamHidden = document.getElementById('pelanggan-jam');
+        const boxExpress = document.getElementById('box-express-jadwal');
+        const secJadwal = document.getElementById('section-pelanggan-jadwal');
+        const tipePengambilan = document.getElementById('pelanggan-pengambilan-val')?.value || 'Dijemput kurir';
+
+        if (val === 'Express') {
+            const expTimes = getExpressPickupDeliveryTimes(tipePengambilan);
+            if (jamHidden) jamHidden.value = expTimes.combined;
+
+            const elJemput = document.getElementById('express-jam-jemput');
+            const elAntar = document.getElementById('express-jam-antar');
+            if (elJemput) elJemput.innerText = expTimes.jamJemput;
+            if (elAntar) elAntar.innerText = expTimes.jamAntar;
+
+            if (boxExpress) boxExpress.classList.remove('hidden');
+            if (secJadwal) secJadwal.classList.add('hidden');
+
+            showCloudToast('Express aktif: Menampilkan jam penjemputan & jam pengantaran (4 jam selesai)!');
+        } else {
+            // Cuci Kiloan: Tampilkan form jadwal minimal H+1
+            if (boxExpress) boxExpress.classList.add('hidden');
+            if (secJadwal) secJadwal.classList.remove('hidden');
+            updatePelangganJadwalFromInputs();
+        }
+        calculatePelangganTotals();
     }
     if (group === 'pengambilan') {
         document.getElementById('pelanggan-pengambilan-val').value = val;
         const secAlamat = document.getElementById('section-pelanggan-alamat');
+        const infoJemput = document.getElementById('info-kurir-jemput');
+        const infoAntar = document.getElementById('info-antar-sendiri');
+
         if (val === 'Dijemput kurir') {
-            secAlamat.classList.remove('hidden');
-            document.getElementById('pelanggan-ongkir-text').innerText = 'Rp 3.000';
-            document.getElementById('pelanggan-total-text').innerText = 'Rp 24.000';
+            if (secAlamat) secAlamat.classList.remove('hidden');
+            if (infoJemput) infoJemput.classList.remove('hidden');
+            if (infoAntar) infoAntar.classList.add('hidden');
         } else {
-            secAlamat.classList.add('hidden');
-            document.getElementById('pelanggan-ongkir-text').innerText = 'Rp 0';
-            document.getElementById('pelanggan-total-text').innerText = 'Rp 21.000';
+            // Antar sendiri ke toko
+            if (secAlamat) secAlamat.classList.add('hidden');
+            if (infoJemput) infoJemput.classList.add('hidden');
+            if (infoAntar) infoAntar.classList.remove('hidden');
         }
+
+        // Perbarui teks jadwal sesuai opsi: Antar sendiri -> 'Ambil pada', Kurir -> 'Tentukan hari pengantaran'
+        updateJadwalLabels(val);
+
+        // Perbarui jam Express jika Express sedang aktif
+        const layananVal = document.getElementById('pelanggan-layanan-val')?.value;
+        if (layananVal === 'Express') {
+            const expTimes = getExpressPickupDeliveryTimes(val);
+            const jamHidden = document.getElementById('pelanggan-jam');
+            if (jamHidden) jamHidden.value = expTimes.combined;
+            const elJemput = document.getElementById('express-jam-jemput');
+            const elAntar = document.getElementById('express-jam-antar');
+            if (elJemput) elJemput.innerText = expTimes.jamJemput;
+            if (elAntar) elAntar.innerText = expTimes.jamAntar;
+        }
+
+        calculatePelangganTotals();
     }
     if (group === 'metode') {
         document.getElementById('pelanggan-metode-val').value = val;
+        // Pop-up pembayaran HANYA muncul saat pelanggan melakukan pembayaran (saat submit order / tombol bayar)
     }
 }
 
-function handleKirimPesananPelanggan(e) {
+// Helpers Form Jadwal Pengambilan (Minimal H+1 dari hari ini)
+function getMinScheduleDate() {
+    const d = new Date();
+    d.setDate(d.getDate() + 1); // H+1
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+function getDateOffset(days) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+function initPelangganJadwal() {
+    const tglInput = document.getElementById('pelanggan-tgl-ambil');
+    if (!tglInput) return;
+    const minDate = getMinScheduleDate();
+    tglInput.min = minDate;
+    if (!tglInput.value || tglInput.value < minDate) {
+        tglInput.value = minDate;
+    }
+
+    const boxExpress = document.getElementById('box-express-jadwal');
+    const secJadwal = document.getElementById('section-pelanggan-jadwal');
+    const layananEl = document.getElementById('pelanggan-layanan-val');
+    const tipePengambilan = document.getElementById('pelanggan-pengambilan-val')?.value || 'Dijemput kurir';
+
+    updateJadwalLabels(tipePengambilan);
+
+    if (layananEl && layananEl.value === 'Express') {
+        const expTimes = getExpressPickupDeliveryTimes(tipePengambilan);
+        const jamHidden = document.getElementById('pelanggan-jam');
+        if (jamHidden) jamHidden.value = expTimes.combined;
+        const elJemput = document.getElementById('express-jam-jemput');
+        const elAntar = document.getElementById('express-jam-antar');
+        if (elJemput) elJemput.innerText = expTimes.jamJemput;
+        if (elAntar) elAntar.innerText = expTimes.jamAntar;
+        if (boxExpress) boxExpress.classList.remove('hidden');
+        if (secJadwal) secJadwal.classList.add('hidden');
+    } else {
+        if (boxExpress) boxExpress.classList.add('hidden');
+        if (secJadwal) secJadwal.classList.remove('hidden');
+        updatePelangganJadwalFromInputs();
+    }
+}
+
+function setPelangganQuickDay(offset, btn) {
+    const tglInput = document.getElementById('pelanggan-tgl-ambil');
+    if (!tglInput) return;
+    tglInput.value = getDateOffset(offset);
+    document.querySelectorAll('#pelanggan-quick-days .btn-quick-day').forEach(b => {
+        b.className = 'btn-quick-day flex-1 py-1 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-600 text-[10px] font-medium text-center transition';
+    });
+    if (btn) {
+        btn.className = 'btn-quick-day active flex-1 py-1 rounded-lg border border-teal-600 bg-teal-50 text-teal-800 text-[10px] font-bold text-center transition';
+    }
+    updatePelangganJadwalFromInputs();
+}
+
+function updatePelangganJadwalFromInputs() {
+    const tglInput = document.getElementById('pelanggan-tgl-ambil');
+    const jamSelect = document.getElementById('pelanggan-jam-ambil');
+    const jamHidden = document.getElementById('pelanggan-jam');
+    if (!tglInput || !jamSelect || !jamHidden) return;
+
+    const tipePengambilan = document.getElementById('pelanggan-pengambilan-val')?.value || 'Dijemput kurir';
+    const isAntarSendiri = (tipePengambilan === 'Antar sendiri ke toko');
+
+    const minDate = getMinScheduleDate();
+    if (tglInput.value && tglInput.value < minDate) {
+        const errorTitle = isAntarSendiri ? 'Jadwal Ambil di Toko' : 'Jadwal Pengantaran Kurir';
+        const errorMsg = isAntarSendiri 
+            ? 'Jadwal pengambilan pakaian bersih di toko minimal H+1 hari dari tanggal pemesanan!' 
+            : 'Jadwal pengantaran pakaian oleh kurir minimal H+1 hari dari tanggal pemesanan!';
+        triggerLoginError(errorMsg, errorTitle);
+        tglInput.value = minDate;
+    }
+
+    if (!tglInput.value) tglInput.value = minDate;
+
+    const d = new Date(tglInput.value + 'T00:00:00');
+    const dayName = d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+    const jamVal = jamSelect.value;
+
+    const prefix = isAntarSendiri ? 'Ambil pada' : 'Diantar pada';
+    jamHidden.value = `${prefix}: ${dayName} (${jamVal})`;
+}
+
+function selectPelangganJadwal(jadwalStr, el) {
+    const jamInput = document.getElementById('pelanggan-jam');
+    if (jamInput) jamInput.value = jadwalStr;
+}
+
+function calculatePelangganTotals() {
+    const beratInput = document.getElementById('pelanggan-berat');
+    let berat = parseFloat(beratInput ? beratInput.value : 3) || 1;
+    if (berat < 1) berat = 1;
+
+    const layananEl = document.getElementById('pelanggan-layanan-val');
+    const pengambilanEl = document.getElementById('pelanggan-pengambilan-val');
+
+    const layanan = (layananEl && layananEl.value) ? layananEl.value : 'Cuci Kiloan';
+    const pengambilan = (pengambilanEl && pengambilanEl.value) ? pengambilanEl.value : 'Dijemput kurir';
+
+    const tarifPerKg = (layanan === 'Express') ? 10000 : 7000;
+    const subtotal = Math.round(berat * tarifPerKg);
+    const ongkir = (pengambilan === 'Dijemput kurir') ? 3000 : 0;
+    const total = subtotal + ongkir;
+
+    const subText = document.getElementById('pelanggan-subtotal-text');
+    const ongText = document.getElementById('pelanggan-ongkir-text');
+    const totText = document.getElementById('pelanggan-total-text');
+
+    if (subText) subText.innerText = `Rp ${subtotal.toLocaleString('id-ID')} (${berat} kg)`;
+    if (ongText) ongText.innerText = `Rp ${ongkir.toLocaleString('id-ID')}`;
+    if (totText) totText.innerText = `Rp ${total.toLocaleString('id-ID')}`;
+
+    return { berat, subtotal, ongkir, total, layanan, pengambilan };
+}
+
+async function handleKirimPesananPelanggan(e) {
     e.preventDefault();
     if (!currentUser) return;
 
-    const layanan = document.getElementById('pelanggan-layanan-val').value;
-    const pengambilan = document.getElementById('pelanggan-pengambilan-val').value;
-    const alamat = document.getElementById('pelanggan-alamat').value.trim();
-    const jam = document.getElementById('pelanggan-jam').value.trim();
-    const catatan = document.getElementById('pelanggan-catatan').value.trim();
-    const metode = document.getElementById('pelanggan-metode-val').value;
+    const { berat, subtotal, ongkir, total, layanan, pengambilan } = calculatePelangganTotals();
 
-    const ongkir = pengambilan === 'Dijemput kurir' ? 3000 : 0;
-    const subtotal = layanan === 'Express' ? 30000 : 21000;
-    const total = subtotal + ongkir;
+    // Validasi Minimal Order 1 kg
+    if (berat < 1) {
+        triggerLoginError('Minimal order cucian adalah 1 kg! Silakan masukkan estimasi berat minimal 1 kg.', 'Pesanan Gagal');
+        return;
+    }
 
-    const nextNum = String(dataset.length + 1).padStart(4, '0');
-    const resi = `LD-${nextNum}`;
+    const alamatEl = document.getElementById('pelanggan-alamat');
+    const jamEl = document.getElementById('pelanggan-jam');
+    const catatanEl = document.getElementById('pelanggan-catatan');
+    const metodeEl = document.getElementById('pelanggan-metode-val');
+
+    const alamat = (alamatEl && alamatEl.value ? alamatEl.value : '').trim();
+    const jam = (jamEl && jamEl.value ? jamEl.value : '').trim();
+    const catatan = (catatanEl && catatanEl.value ? catatanEl.value : '').trim();
+    const metode = (metodeEl && metodeEl.value ? metodeEl.value : 'Tunai saat jemput/antar');
+
+    const isJemput = (pengambilan === 'Dijemput kurir');
+    if (isJemput && !alamat) {
+        triggerLoginError('Mohon isi alamat lengkap penjemputan pakaian agar kurir kami dapat langsung mendatangi rumah Anda.', 'Alamat Penjemputan');
+        if (alamatEl) alamatEl.focus();
+        return;
+    }
+
+    const finalAlamat = isJemput ? alamat : (alamat || 'Antar & Ambil Sendiri di Gerai DMS Laundry');
+    const resi = getNextResiNumber();
+    const isNonCash = (metode !== 'Tunai saat jemput/antar');
+
+    // Status otomatis: jika transfer/QRIS/E-wallet -> Menunggu Konfirmasi (agar tidak rugi sebelum diverifikasi admin)
+    const orderStatus = isNonCash ? 'Menunggu Konfirmasi' : 'Baru';
+    const orderStatusBayar = isNonCash ? 'Menunggu Konfirmasi' : 'Belum dibayar';
 
     const newOrder = {
         resi,
         nama: currentUser.nama,
         hp: currentUser.hp || '081234567890',
-        layanan,
-        berat: 3,
+        layanan: `${layanan} (${berat} kg)`,
+        berat,
         tipe: pengambilan,
-        alamat,
+        alamat: finalAlamat,
         jam,
         catatan,
         subtotal,
@@ -713,8 +1608,8 @@ function handleKirimPesananPelanggan(e) {
         ongkir,
         total,
         metode,
-        statusBayar: (metode === 'Tunai saat jemput/antar') ? 'Belum dibayar' : 'Lunas',
-        status: 'Baru',
+        statusBayar: orderStatusBayar,
+        status: orderStatus,
         tanggal: new Date().toISOString().split('T')[0]
     };
 
@@ -723,11 +1618,70 @@ function handleKirimPesananPelanggan(e) {
 
     // Simpan ke database Supabase
     if (typeof insertTransactionToDB === 'function') {
-        insertTransactionToDB(newOrder);
+        await insertTransactionToDB(newOrder);
     }
 
-    alert(`Pesanan berhasil dibuat!\nNomor Pesanan Anda: ${resi}\nKurir akan memproses pesanan Anda.`);
-    switchPelangganTab('pesanan');
+    // Tampilkan Pop-Up Rincian Pesanan yang Mudah Dibaca
+    const modalSubtitle = isJemput
+        ? 'Kurir DMS Laundry akan langsung mendatangi alamat Anda untuk mengambil pakaian cucian setelah pesanan diproses.'
+        : 'Silakan serahkan pakaian cucian Anda langsung ke gerai toko DMS Laundry sesuai jadwal.';
+
+    if (isNonCash) {
+        showReadableModal({
+            icon: 'fa-solid fa-clock text-amber-600',
+            iconWrapClass: 'w-14 h-14 bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm',
+            title: 'Pesanan Berhasil Dibuat!',
+            subtitle: modalSubtitle,
+            rows: [
+                { label: 'Nomor Resi', value: resi, isBadge: true, badgeClass: 'px-2.5 py-1 rounded-md font-extrabold text-teal-800 bg-teal-50 border border-teal-300 font-mono text-xs' },
+                { label: 'Layanan Cucian', value: `${layanan} (${berat} kg)` },
+                { label: 'Metode Pengantaran', value: `${pengambilan} (${ongkir > 0 ? 'Ongkir Rp ' + ongkir.toLocaleString('id-ID') : 'Gratis / Rp 0'})` },
+                { label: isJemput ? 'Hari & Jam Pengantaran' : 'Ambil pada', value: jam || 'Segera' },
+                { label: isJemput ? 'Alamat Penjemputan' : 'Lokasi Serah Terima', value: finalAlamat },
+                { label: 'Total Pembayaran', value: `Rp ${total.toLocaleString('id-ID')}`, highlight: true },
+                { label: 'Metode Pembayaran', value: metode },
+                { label: 'Status Pesanan', value: 'Menunggu Konfirmasi Admin', isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-amber-50 text-amber-700 border border-amber-300' }
+            ],
+            primaryBtn: {
+                text: '💳 Lanjut Bayar QRIS & Rekening',
+                class: 'flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm',
+                onClick: () => {
+                    switchPelangganTab('pesanan');
+                    openQrisModal(total, resi);
+                }
+            },
+            secondaryBtn: {
+                text: 'Pantau di Pesanan Saya',
+                onClick: () => {
+                    switchPelangganTab('pesanan');
+                }
+            }
+        });
+    } else {
+        showReadableModal({
+            icon: 'fa-solid fa-circle-check text-emerald-600',
+            iconWrapClass: 'w-14 h-14 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm',
+            title: 'Pesanan Berhasil Dibuat!',
+            subtitle: modalSubtitle,
+            rows: [
+                { label: 'Nomor Resi', value: resi, isBadge: true, badgeClass: 'px-2.5 py-1 rounded-md font-extrabold text-teal-800 bg-teal-50 border border-teal-300 font-mono text-xs' },
+                { label: 'Layanan Cucian', value: `${layanan} (${berat} kg)` },
+                { label: 'Metode Pengantaran', value: `${pengambilan} (${ongkir > 0 ? 'Ongkir Rp ' + ongkir.toLocaleString('id-ID') : 'Gratis / Rp 0'})` },
+                { label: isJemput ? 'Hari & Jam Pengantaran' : 'Ambil pada', value: jam || 'Segera' },
+                { label: isJemput ? 'Alamat Penjemputan' : 'Lokasi Serah Terima', value: finalAlamat },
+                { label: 'Total Estimasi', value: `Rp ${total.toLocaleString('id-ID')}`, highlight: true },
+                { label: 'Metode Pembayaran', value: 'Tunai saat jemput/antar' },
+                { label: 'Status Pesanan', value: 'Baru', isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-slate-100 text-slate-700 border border-slate-200' }
+            ],
+            primaryBtn: {
+                text: '📋 Buka Pesanan Saya',
+                class: 'flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm',
+                onClick: () => {
+                    switchPelangganTab('pesanan');
+                }
+            }
+        });
+    }
 }
 
 function renderPelangganOrders() {
@@ -749,15 +1703,57 @@ function renderPelangganOrders() {
     container.innerHTML = myOrders.map(item => {
         // Status Badges
         let statusBadge = '';
-        if (item.status === 'Siap diantar') statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-blue-50 text-blue-700">Siap diantar</span>`;
-        else if (item.status === 'Dicuci' || item.status === 'Diproses') statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-amber-50 text-amber-700">Dicuci</span>`;
-        else if (item.status === 'Selesai') statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-700">Selesai</span>`;
+        if (item.status === 'Menunggu Konfirmasi') statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-300 animate-pulse inline-flex items-center gap-1"><i class="fa-solid fa-clock"></i>Menunggu Konfirmasi</span>`;
+        else if (item.status === 'Siap diantar') statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-700 inline-flex items-center gap-1"><i class="fa-solid fa-truck-fast"></i>Siap diantar</span>`;
+        else if (item.status === 'Siap diambil') statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-700 inline-flex items-center gap-1"><i class="fa-solid fa-store"></i>Siap diambil</span>`;
+        else if (item.status === 'Dicuci' || item.status === 'Diproses') statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-teal-50 text-teal-700 inline-flex items-center gap-1"><i class="fa-solid fa-jug-detergent"></i>Diproses</span>`;
+        else if (item.status === 'Selesai') statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-700 inline-flex items-center gap-1"><i class="fa-solid fa-circle-check"></i>Selesai</span>`;
         else statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-slate-100 text-slate-700">${item.status}</span>`;
 
         // Payment Badges
         let bayarBadge = item.statusBayar === 'Lunas' ?
             `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-700">Lunas</span>` :
+            item.statusBayar === 'Menunggu Konfirmasi' ?
+            `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-amber-50 text-amber-700">Menunggu Konfirmasi</span>` :
             `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-rose-50 text-rose-700">Belum dibayar</span>`;
+
+        // Notice status pengerjaan untuk pelanggan
+        let statusNotice = '';
+        if (item.status === 'Menunggu Konfirmasi') {
+            statusNotice = `
+                <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-0.5">
+                    <div class="font-bold flex items-center gap-1.5 text-amber-800"><i class="fa-solid fa-clock"></i> Menunggu Konfirmasi Admin</div>
+                    <p class="text-[11px] text-amber-700">Pembayaran Anda sedang kami verifikasi. Admin akan mengonfirmasi status pesanan ini segera.</p>
+                </div>
+            `;
+        } else if (item.status === 'Siap diambil') {
+            statusNotice = `
+                <div class="p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 space-y-0.5">
+                    <div class="font-bold flex items-center gap-1.5 text-indigo-800"><i class="fa-solid fa-store"></i> Siap Diambil di Gerai</div>
+                    <p class="text-[11px] text-indigo-700">Pakaian bersih Anda telah selesai disetrika dan siap Anda ambil di gerai DMS Laundry.</p>
+                </div>
+            `;
+        } else if (item.status === 'Siap diantar') {
+            statusNotice = `
+                <div class="p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 space-y-0.5">
+                    <div class="font-bold flex items-center gap-1.5 text-indigo-800"><i class="fa-solid fa-truck-fast"></i> Sedang Diantar Kurir</div>
+                    <p class="text-[11px] text-indigo-700">Kurir DMS Laundry sedang dalam perjalanan mengantarkan pakaian bersih ke alamat Anda.</p>
+                </div>
+            `;
+        }
+
+        // Tombol Bayar QRIS jika belum lunas / masih menunggu konfirmasi
+        let payBtn = '';
+        if (item.statusBayar !== 'Lunas' && item.metode !== 'Tunai saat jemput/antar') {
+            const btnText = item.status === 'Menunggu Konfirmasi' ? 'Lihat QRIS / Bukti Rekening' : 'Bayar Sekarang via QRIS / Bank';
+            payBtn = `
+                <div class="pt-2 border-t border-slate-100">
+                    <button onclick="openQrisModal(${item.total}, '${item.resi}')" class="w-full py-2 px-3 rounded-xl bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-800 text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm">
+                        <i class="fa-solid fa-qrcode"></i> ${btnText}
+                    </button>
+                </div>
+            `;
+        }
 
         return `
             <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3 hover:border-teal-600 transition">
@@ -765,16 +1761,114 @@ function renderPelangganOrders() {
                     <span class="text-base font-extrabold text-slate-900 font-mono">${item.resi}</span>
                     ${statusBadge}
                 </div>
+                ${statusNotice}
                 <div class="text-xs text-slate-500">
-                    ${item.layanan} · Estimasi selesai: ${item.tanggal}
+                    ${item.layanan} · Estimasi / Jadwal: <span class="font-semibold text-slate-700 font-mono">${item.jam || item.tanggal}</span>
                 </div>
                 <div class="flex justify-between items-center pt-2 border-t border-slate-100 text-xs">
                     <span class="text-slate-600">${item.metode} · ${bayarBadge}</span>
-                    <span class="font-extrabold text-slate-900 font-mono">Rp ${item.total.toLocaleString('id-ID')}</span>
+                    <span class="font-extrabold text-slate-900 font-mono text-sm">Rp ${(item.total || 0).toLocaleString('id-ID')}</span>
                 </div>
+                ${payBtn}
             </div>
         `;
     }).join('');
+}
+
+// Modal Pop-up QRIS & Data Rekening (GoPay & Bank Jago dari QRIS.zip)
+let currentPayingResi = null;
+
+function openQrisModal(customNominal, resiOrLabel) {
+    currentPayingResi = resiOrLabel || null;
+    const modal = document.getElementById('modal-pembayaran-qris');
+    if (!modal) return;
+
+    let nominalText = 'Rp 24.000';
+    if (customNominal) {
+        nominalText = `Rp ${parseInt(customNominal, 10).toLocaleString('id-ID')}`;
+    } else {
+        const kasirTot = document.getElementById('kasir-total-display');
+        const pelTot = document.getElementById('pelanggan-total-text');
+        if (kasirTot && kasirTot.innerText !== 'Rp 0') nominalText = kasirTot.innerText;
+        else if (pelTot) nominalText = pelTot.innerText;
+    }
+
+    const nomEl = document.getElementById('modal-qris-nominal');
+    if (nomEl) nomEl.innerText = nominalText;
+
+    const resiEl = document.getElementById('modal-qris-resi-info');
+    if (resiEl) {
+        resiEl.innerText = resiOrLabel ? `Pesanan: ${resiOrLabel}` : 'DMS Laundry Official Payment';
+    }
+
+    modal.classList.remove('hidden');
+}
+
+function closeQrisModal() {
+    const modal = document.getElementById('modal-pembayaran-qris');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function konfirmasiSudahBayar() {
+    closeQrisModal();
+    if (currentPayingResi) {
+        const item = dataset.find(x => x.resi === currentPayingResi);
+        if (item) {
+            item.status = 'Menunggu Konfirmasi';
+            item.statusBayar = 'Menunggu Konfirmasi';
+            saveData();
+            renderPelangganOrders();
+            renderOnlineOrdersTable();
+
+            if (typeof updateTransactionStatusInDB === 'function') {
+                await updateTransactionStatusInDB(item.resi, 'Menunggu Konfirmasi', 'Menunggu Konfirmasi');
+            }
+        }
+    }
+    showCloudToast('Konfirmasi pembayaran dicatat! Menunggu verifikasi admin agar pesanan segera dikerjakan.');
+
+    showReadableModal({
+        icon: 'fa-solid fa-clock text-amber-600',
+        iconWrapClass: 'w-14 h-14 bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm',
+        title: 'Konfirmasi Pembayaran Diterima!',
+        subtitle: 'Terima kasih telah melakukan pembayaran. Bukti pembayaran Anda sedang kami verifikasi sebelum pakaian mulai dicuci.',
+        rows: [
+            { label: 'Nomor Pesanan', value: currentPayingResi || 'LD-Official', isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-mono font-bold bg-teal-50 text-teal-800 border border-teal-300' },
+            { label: 'Status Pembayaran', value: 'Menunggu Konfirmasi Admin', isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-amber-50 text-amber-700 border border-amber-300' },
+            { label: 'Proses Berikutnya', value: 'Admin memverifikasi mutasi bank & kurir menjemput pakaian' }
+        ],
+        primaryBtn: {
+            text: '📋 Pantau di Pesanan Saya',
+            onClick: () => {
+                if (currentUser && currentUser.role === 'pelanggan') {
+                    switchPelangganTab('pesanan');
+                }
+            }
+        }
+    });
+
+    if (currentUser && currentUser.role === 'pelanggan') {
+        switchPelangganTab('pesanan');
+    }
+}
+
+function copyPaymentData(text, btnElement) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            if (btnElement) {
+                const original = btnElement.innerHTML;
+                btnElement.innerHTML = `<i class="fa-solid fa-check text-emerald-600"></i> Tersalin!`;
+                btnElement.classList.add('bg-emerald-50', 'text-emerald-700');
+                setTimeout(() => {
+                    btnElement.innerHTML = original;
+                    btnElement.classList.remove('bg-emerald-50', 'text-emerald-700');
+                }, 2000);
+            }
+            showCloudToast(`Nomor ${text} berhasil disalin ke clipboard!`);
+        });
+    } else {
+        prompt('Salin nomor berikut:', text);
+    }
 }
 
 // ========================================================
@@ -1140,6 +2234,18 @@ function showReceipt(item) {
     document.getElementById('rec-tipe').innerText = item.tipe;
     document.getElementById('rec-layanan').innerText = `${item.layanan} (${item.berat} kg)`;
     document.getElementById('rec-subtotal').innerText = `Rp ${item.subtotal.toLocaleString('id-ID')}`;
+    
+    const ongRow = document.getElementById('rec-row-ongkir');
+    const ongEl = document.getElementById('rec-ongkir');
+    if (ongRow && ongEl) {
+        if (item.ongkir > 0) {
+            ongRow.classList.remove('hidden');
+            ongEl.innerText = `Rp ${item.ongkir.toLocaleString('id-ID')}`;
+        } else {
+            ongRow.classList.add('hidden');
+        }
+    }
+
     document.getElementById('rec-diskon').innerText = `Rp ${(item.diskon || 0).toLocaleString('id-ID')}`;
     document.getElementById('rec-total').innerText = `Rp ${item.total.toLocaleString('id-ID')}`;
 
@@ -1173,7 +2279,17 @@ async function initDataSync() {
     if (typeof fetchTransactionsFromDB === 'function') {
         const remoteTrx = await fetchTransactionsFromDB();
         if (remoteTrx && remoteTrx.length > 0) {
-            dataset = remoteTrx;
+            // Gabungkan transaksi remote dengan transaksi lokal secara aman
+            const merged = [...dataset];
+            remoteTrx.forEach(r => {
+                const idx = merged.findIndex(m => m.resi === r.resi);
+                if (idx >= 0) {
+                    merged[idx] = r;
+                } else {
+                    merged.push(r);
+                }
+            });
+            dataset = merged;
             if (currentUser) {
                 if (currentUser.role === 'admin') {
                     refreshNextAutoResi();
@@ -1188,4 +2304,5 @@ async function initDataSync() {
         }
     }
 }
+initPelangganJadwal();
 initDataSync();
