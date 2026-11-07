@@ -23,6 +23,51 @@ function saveUsers() {
     catch (err) { console.warn('[Storage] Gagal menyimpan users:', err.message); }
 }
 
+// ========================================================
+// PESANAN "BELUM TERKIRIM" KE SUPABASE
+// Pesanan baru dicatat di sini sampai berhasil masuk Supabase. Saat sinkron, hanya pesanan
+// inilah yang dipertahankan walau belum ada di server; selebihnya mengikuti isi Supabase
+// (jadi data yang dihapus di Supabase ikut hilang dari web).
+// ========================================================
+const PENDING_KEY = 'DMS_LAUNDRY_PENDING';
+const cloudInFlight = new Set();
+
+function loadPendingResi() {
+    return loadLocalList(PENDING_KEY).map(String);
+}
+function savePendingResi(list) {
+    try { localStorage.setItem(PENDING_KEY, JSON.stringify(list)); }
+    catch (err) { console.warn('[Storage] Gagal menyimpan daftar pending:', err.message); }
+}
+function markPendingResi(resi) {
+    const list = loadPendingResi();
+    if (!list.includes(String(resi))) { list.push(String(resi)); savePendingResi(list); }
+}
+function clearPendingResi(resi) {
+    savePendingResi(loadPendingResi().filter(r => r !== String(resi)));
+}
+
+// Kirim pesanan ke Supabase; hanya dianggap beres jika server menyatakan sukses
+async function pushOrderToCloud(order) {
+    if (!order || !order.resi) return false;
+    markPendingResi(order.resi);
+    if (typeof insertTransactionToDB !== 'function') return false;
+    if (cloudInFlight.has(order.resi)) return false; // jangan kirim dobel
+    cloudInFlight.add(order.resi);
+    try {
+        const result = await insertTransactionToDB(order);
+        if (result && result.success) {
+            clearPendingResi(order.resi);
+            return true;
+        }
+    } catch (err) {
+        console.error('[Supabase] Simpan pesanan gagal:', err);
+    } finally {
+        cloudInFlight.delete(order.resi);
+    }
+    return false;
+}
+
 let currentUser = JSON.parse(sessionStorage.getItem('DMS_LAUNDRY_USER')) || null;
 let loginTimer = null;
 let logoutTimer = null;
@@ -561,27 +606,47 @@ function switchAdminTab(tab) {
     }
 }
 
-function getNextResiNumber() {
-    let maxNum = 0;
-    if (Array.isArray(dataset)) {
-        dataset.forEach(item => {
-            if (item && item.resi) {
-                const match = String(item.resi).match(/(\d+)/);
-                if (match) {
-                    const num = parseInt(match[1], 10);
-                    if (!isNaN(num) && num > maxNum) maxNum = num;
-                }
-            }
-        });
+// ========================================================
+// NOMOR RESI ACAK (format LD-XXXXXX, tanpa huruf/angka yang mirip: 0/O, 1/I)
+// ========================================================
+const RESI_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 karakter
+let pendingKasirResi = null; // resi yang sedang ditampilkan di layar kasir
+
+function randomResiCode(length = 6) {
+    const bytes = new Uint8Array(length);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        crypto.getRandomValues(bytes);
+    } else {
+        for (let i = 0; i < length; i++) bytes[i] = Math.floor(Math.random() * 256);
     }
-    const nextVal = Math.max(maxNum + 1, (dataset ? dataset.length : 0) + 1);
-    return `LD-${String(nextVal).padStart(4, '0')}`;
+    let out = '';
+    for (const b of bytes) out += RESI_ALPHABET[b & 31];
+    return out;
 }
 
-function refreshNextAutoResi() {
-    const autoResi = getNextResiNumber();
+function isResiUsed(resi) {
+    const key = String(resi).toUpperCase();
+    return Array.isArray(dataset) && dataset.some(x => x && String(x.resi).toUpperCase() === key);
+}
+
+// Membuat resi acak yang belum dipakai pesanan lain
+function getNextResiNumber() {
+    let resi;
+    let tries = 0;
+    do {
+        resi = `LD-${randomResiCode()}`;
+        tries++;
+    } while (isResiUsed(resi) && tries < 50);
+    return resi;
+}
+
+// Resi di layar kasir dibuat sekali, dan dipakai persis sama saat order disimpan
+function refreshNextAutoResi(forceNew = false) {
+    if (forceNew || !pendingKasirResi || isResiUsed(pendingKasirResi)) {
+        pendingKasirResi = getNextResiNumber();
+    }
     const el = document.getElementById('auto-resi-display');
-    if (el) el.innerText = autoResi;
+    if (el) el.innerText = pendingKasirResi;
 }
 
 function selectKasirRadio(group, value, element) {
@@ -846,7 +911,9 @@ async function handleKasirOrder(e) {
 
     const finalAlamat = (tipe === 'Dijemput kurir') ? alamat : (alamat || 'Gerai Toko DMS Laundry');
     const initialStatus = (tipe === 'Dijemput kurir') ? 'Baru' : 'Diproses';
-    const resi = getNextResiNumber();
+    // Pakai resi yang tampil di layar kasir; setelah dipakai, kosongkan agar order berikutnya dapat resi baru
+    const resi = (pendingKasirResi && !isResiUsed(pendingKasirResi)) ? pendingKasirResi : getNextResiNumber();
+    pendingKasirResi = null;
 
     let layananStr = [];
     if (qtyKiloan > 0) layananStr.push(`Cuci Kiloan (${qtyKiloan} kg)`);
@@ -875,10 +942,8 @@ async function handleKasirOrder(e) {
     dataset.unshift(item);
     saveData();
 
-    // Simpan ke Supabase jika terhubung
-    if (typeof insertTransactionToDB === 'function') {
-        await insertTransactionToDB(item);
-    }
+    // Simpan ke Supabase jika terhubung (dicatat sebagai 'belum terkirim' sampai berhasil)
+    await pushOrderToCloud(item);
 
     // Reset Form
     clearSelectedCustomer();
@@ -1628,9 +1693,7 @@ async function handleKirimPesananPelanggan(e) {
     saveData();
 
     // Simpan ke database Supabase di latar belakang (tidak menahan popup)
-    if (typeof insertTransactionToDB === 'function') {
-        insertTransactionToDB(newOrder).catch(err => console.error('[Supabase] Simpan pesanan gagal:', err));
-    }
+    pushOrderToCloud(newOrder);
 
     // Tampilkan Pop-Up Rincian Pesanan yang Mudah Dibaca
     const modalSubtitle = isJemput
@@ -2355,40 +2418,61 @@ if (currentUser) {
 }
 
 // Sinkronisasi data awal dengan database Supabase Cloud jika aktif
+let dataSyncRunning = false;
+let lastDataSyncAt = 0;
+
 async function initDataSync() {
-    if (typeof fetchUsersFromDB === 'function') {
-        const remoteUsers = await fetchUsersFromDB();
-        if (remoteUsers && remoteUsers.length > 0) {
-            users = remoteUsers;
+    if (dataSyncRunning) return;
+    dataSyncRunning = true;
+    try {
+        if (typeof fetchUsersFromDB === 'function') {
+            const remoteUsers = await fetchUsersFromDB();
+            if (remoteUsers && remoteUsers.length > 0) {
+                users = remoteUsers;
+            }
         }
-    }
-    if (typeof fetchTransactionsFromDB === 'function') {
-        const remoteTrx = await fetchTransactionsFromDB();
-        if (remoteTrx && remoteTrx.length > 0) {
-            // Gabungkan transaksi remote dengan transaksi lokal secara aman
-            const merged = [...dataset];
-            remoteTrx.forEach(r => {
-                const idx = merged.findIndex(m => m.resi === r.resi);
-                if (idx >= 0) {
-                    merged[idx] = r;
-                } else {
-                    merged.push(r);
-                }
-            });
-            dataset = merged;
-            if (currentUser) {
-                if (currentUser.role === 'admin') {
-                    refreshNextAutoResi();
-                    renderOnlineOrdersTable();
-                } else if (currentUser.role === 'pelanggan') {
-                    renderPelangganOrders();
-                } else if (currentUser.role === 'owner') {
-                    renderOwnerStats();
-                    renderOwnerDetailedReport();
+        if (typeof fetchTransactionsFromServer === 'function') {
+            // null = server tidak bisa dihubungi -> data lokal dibiarkan apa adanya
+            const remoteTrx = await fetchTransactionsFromServer();
+            if (Array.isArray(remoteTrx)) {
+                // Supabase adalah sumber utama: pesanan yang sudah tidak ada di Supabase ikut dihapus dari web.
+                // Pengecualian: pesanan baru yang belum berhasil terkirim tetap dipertahankan dan dikirim ulang.
+                const remoteResi = new Set(remoteTrx.map(r => String(r.resi)));
+                const pending = loadPendingResi().filter(r => !remoteResi.has(r));
+                const unsynced = dataset.filter(x => x && pending.includes(String(x.resi)));
+                savePendingResi(unsynced.map(x => String(x.resi)));
+
+                dataset = [...unsynced, ...remoteTrx];
+                saveData();
+                unsynced.forEach(o => pushOrderToCloud(o));
+
+                if (currentUser) {
+                    if (currentUser.role === 'admin') {
+                        refreshNextAutoResi();
+                        renderOnlineOrdersTable();
+                    } else if (currentUser.role === 'pelanggan') {
+                        renderPelangganOrders();
+                    } else if (currentUser.role === 'owner') {
+                        renderOwnerStats();
+                        renderOwnerDetailedReport();
+                    }
                 }
             }
         }
+    } catch (err) {
+        console.warn('[Sinkron] Gagal sinkronisasi data:', err.message);
+    } finally {
+        dataSyncRunning = false;
+        lastDataSyncAt = Date.now();
     }
 }
+
+// Sinkron ulang saat tab web dibuka kembali (maksimal sekali per 15 detik)
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && Date.now() - lastDataSyncAt > 15000) {
+        initDataSync();
+    }
+});
+
 initPelangganJadwal();
 initDataSync();

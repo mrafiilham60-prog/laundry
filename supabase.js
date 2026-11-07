@@ -218,7 +218,7 @@ async function insertUserToDB(userObj) {
 /**
  * Mengambil seluruh transaksi dari Supabase (atau fallback LocalStorage)
  */
-async function fetchTransactionsFromDB() {
+async function fetchTransactionsFromServer() {
     let rawData = null;
 
     // 1. Coba lewat SDK
@@ -250,7 +250,8 @@ async function fetchTransactionsFromDB() {
     }
 
     // 3. Mapping data dari snake_case (DB) ke camelCase (App)
-    if (rawData && rawData.length > 0) {
+    // Server berhasil dihubungi (meskipun tabel kosong) -> hasilnya adalah data resmi dari Supabase
+    if (Array.isArray(rawData)) {
         const mappedData = rawData.map(item => ({
             resi: item.resi,
             nama: item.nama,
@@ -271,11 +272,23 @@ async function fetchTransactionsFromDB() {
             tanggal: item.tanggal
         }));
 
-        localStorage.setItem('DMS_LAUNDRY_TRANSAKSI', JSON.stringify(mappedData));
         return mappedData;
     }
 
-    // 4. Fallback ke LocalStorage
+    // Server tidak bisa dihubungi / belum dikonfigurasi: kembalikan null (BUKAN data lokal),
+    // supaya aplikasi tahu bahwa data lokal tidak boleh dianggap sudah dihapus dari server.
+    return null;
+}
+
+/**
+ * Versi lama (tetap tersedia): memakai cache lokal jika server tidak bisa dihubungi
+ */
+async function fetchTransactionsFromDB() {
+    const fromServer = await fetchTransactionsFromServer();
+    if (fromServer && fromServer.length > 0) {
+        localStorage.setItem('DMS_LAUNDRY_TRANSAKSI', JSON.stringify(fromServer));
+        return fromServer;
+    }
     return JSON.parse(localStorage.getItem('DMS_LAUNDRY_TRANSAKSI')) || [];
 }
 
@@ -322,6 +335,7 @@ async function insertTransactionToDB(trxObj) {
             method: 'POST',
             body: JSON.stringify(payload)
         });
+        if (data === null) throw new Error('Supabase belum dikonfigurasi');
         console.log('[Supabase REST] Transaksi tersimpan di cloud:', data);
         showCloudToast(`Pesanan ${trxObj.resi} tersimpan di Supabase Cloud!`);
         return { success: true, data };
