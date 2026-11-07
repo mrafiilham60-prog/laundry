@@ -1,3 +1,6 @@
+let currentUser = JSON.parse(sessionStorage.getItem('DMS_LAUNDRY_USER')) || null;
+let loginTimer = null;
+let logoutTimer = null;
 // ========================================================
 // NAVIGASI SCREEN UTAMA (Landing, Auth, Dashboard)
 // ========================================================
