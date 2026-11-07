@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase.js"></script>
+</head>
+<body>
+    <script>
+        console.log("Supabase client initialized?", supabase !== null);
+        async function runTest() {
+            try {
+                console.log("Testing insert user...");
+                const res = await insertUserToDB({
+                    nama: "Tester Browser",
+                    hp: "081999888777",
+                    password: "Password123",
+                    role: "pelanggan"
+                });
+                console.log("Insert user result:", JSON.stringify(res));
+            } catch (err) {
+                console.error("Test error:", err);
+            }
+        }
+        runTest();
+    </script>
+</body>
+</html>

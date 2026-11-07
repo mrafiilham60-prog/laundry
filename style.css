@@ -1,0 +1,163 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+    --brand-teal: #0d766e;
+    --brand-teal-dark: #0f5c56;
+    --navy-dark: #0c232f;
+}
+
+body {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    background-color: #f8fafc;
+    color: #0f172a;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.98); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Button & interactive states */
+button, .btn-action {
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.15s ease, filter 0.15s ease, background-color 0.15s ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+button:active:not(:disabled), .btn-action:active:not(:disabled) {
+    transform: scale(0.97) translateY(1px) !important;
+}
+
+button:disabled, .btn-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+/* Custom Radio / Pill Selector (matching PDF mockup) */
+.radio-pill {
+    cursor: pointer;
+    border: 1.5px solid #e2e8f0;
+    background-color: #ffffff;
+    color: #334155;
+    border-radius: 0.75rem;
+    padding: 0.625rem 1rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.15s ease;
+}
+
+.radio-pill:hover {
+    border-color: #cbd5e1;
+    background-color: #f1f5f9;
+}
+
+.radio-pill.active {
+    border-color: #0d766e;
+    background-color: #f0fdfa;
+    color: #0f766e;
+    font-weight: 600;
+    box-shadow: 0 1px 2px 0 rgba(13, 118, 110, 0.1);
+}
+
+.radio-dot {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 9999px;
+    border: 1.5px solid #cbd5e1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #ffffff;
+    transition: all 0.15s ease;
+}
+
+.radio-pill.active .radio-dot {
+    border-color: #0d766e;
+}
+
+.radio-pill.active .radio-dot::after {
+    content: '';
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background-color: #0d766e;
+}
+
+/* Pop-up Modals */
+@keyframes popupIn {
+    0% {
+        opacity: 0;
+        transform: scale(0.9) translateY(10px);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.animate-popup {
+    animation: popupIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pulseSuccess {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(13, 118, 110, 0.4);
+    }
+    50% {
+        transform: scale(1.05);
+        box-shadow: 0 0 0 12px rgba(13, 118, 110, 0);
+    }
+}
+
+.animate-success-icon {
+    animation: pulseSuccess 1.5s infinite ease-in-out;
+}
+
+@keyframes shakeError {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-6px); }
+    40%, 80% { transform: translateX(6px); }
+}
+
+.animate-shake {
+    animation: shakeError 0.35s ease-in-out;
+}
+
+/* Print Styles (Receipt & Owner Report) */
+@media print {
+    body * {
+        visibility: hidden;
+    }
+    .hidden {
+        display: none !important;
+    }
+    #printable-receipt, #printable-receipt *,
+    #printable-owner-report, #printable-owner-report * {
+        visibility: visible;
+    }
+    #printable-receipt {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        color: #000 !important;
+        background: #fff !important;
+    }
+    #printable-owner-report {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        color: #000 !important;
+        background: #fff !important;
+        padding: 24px;
+    }
+}
