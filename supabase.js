@@ -41,11 +41,15 @@ async function supabaseRest(endpoint, options = {}) {
         ...(options.headers || {})
     };
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
     try {
         const response = await fetch(fullUrl, {
             ...options,
-            headers
+            headers,
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
             const errText = await response.text();
@@ -55,6 +59,7 @@ async function supabaseRest(endpoint, options = {}) {
         const data = await response.json();
         return data;
     } catch (err) {
+        clearTimeout(timeoutId);
         console.error(`[Supabase REST Error] ${endpoint}:`, err.message);
         throw err;
     }

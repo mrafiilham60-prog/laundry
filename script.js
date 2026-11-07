@@ -1,3 +1,28 @@
+// ========================================================
+// LAPISAN DATA LOKAL (dataset pesanan & users) + penyimpanan
+// ========================================================
+function loadLocalList(key) {
+    try {
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        console.warn('[Storage] Gagal membaca ' + key + ':', err.message);
+        return [];
+    }
+}
+let users = loadLocalList('DMS_LAUNDRY_USERS');
+let dataset = loadLocalList('DMS_LAUNDRY_TRANSAKSI');
+
+function saveData() {
+    try { localStorage.setItem('DMS_LAUNDRY_TRANSAKSI', JSON.stringify(dataset)); }
+    catch (err) { console.warn('[Storage] Gagal menyimpan pesanan:', err.message); }
+}
+function saveUsers() {
+    try { localStorage.setItem('DMS_LAUNDRY_USERS', JSON.stringify(users)); }
+    catch (err) { console.warn('[Storage] Gagal menyimpan users:', err.message); }
+}
+
 let currentUser = JSON.parse(sessionStorage.getItem('DMS_LAUNDRY_USER')) || null;
 let loginTimer = null;
 let logoutTimer = null;
@@ -651,14 +676,13 @@ function selectKasirTipe(tipe, el) {
 function calculateKasirTotals() {
     const qtyKiloan = parseFloat(document.getElementById('qty-kiloan').value) || 0;
     const qtyExpress = parseFloat(document.getElementById('qty-express').value) || 0;
-    const diskon = parseFloat(document.getElementById('kasir-diskon').value) || 0;
     const tipe = document.getElementById('kasir-tipe-val')?.value || 'Order di Toko';
 
     const subKiloan = qtyKiloan * 7000;
     const subExpress = qtyExpress * 10000;
     const subtotal = subKiloan + subExpress;
     const ongkir = (tipe === 'Dijemput kurir') ? 3000 : 0;
-    const total = Math.max(0, subtotal - diskon + ongkir);
+    const total = subtotal + ongkir;
 
     const subKiloText = document.getElementById('subtotal-kiloan-text');
     const subExpText = document.getElementById('subtotal-express-text');
@@ -680,7 +704,7 @@ function calculateKasirTotals() {
         }
     }
 
-    return { subtotal, diskon, ongkir, total, qtyKiloan, qtyExpress, tipe };
+    return { subtotal, ongkir, total, qtyKiloan, qtyExpress, tipe };
 }
 
 function autocompleteCustomer(val) {
@@ -794,7 +818,7 @@ function quickNewCustomer() {
 
 async function handleKasirOrder(e) {
     e.preventDefault();
-    const { subtotal, diskon, ongkir, total, qtyKiloan, qtyExpress, tipe } = calculateKasirTotals();
+    const { subtotal, ongkir, total, qtyKiloan, qtyExpress, tipe } = calculateKasirTotals();
 
     // Validasi Minimal Order 1 kg
     const totalBerat = qtyKiloan + qtyExpress;
@@ -839,7 +863,7 @@ async function handleKasirOrder(e) {
         jam: document.getElementById('kasir-estimasi').value,
         catatan: '',
         subtotal,
-        diskon,
+        diskon: 0,
         ongkir,
         total,
         metode: document.getElementById('kasir-metode-val').value,
@@ -860,7 +884,6 @@ async function handleKasirOrder(e) {
     clearSelectedCustomer();
     document.getElementById('qty-kiloan').value = 0;
     document.getElementById('qty-express').value = 0;
-    document.getElementById('kasir-diskon').value = 0;
     if (alamatEl) alamatEl.value = '';
     const defTipeBtn = document.querySelector('#kasir-tipe-group .btn-kasir-tipe');
     if (defTipeBtn) selectKasirTipe('Order di Toko', defTipeBtn);
@@ -1543,7 +1566,10 @@ function calculatePelangganTotals() {
 
 async function handleKirimPesananPelanggan(e) {
     e.preventDefault();
-    if (!currentUser) return;
+    if (!currentUser) {
+        triggerLoginError('Sesi Anda berakhir. Silakan login ulang untuk membuat pesanan.', 'Belum Login');
+        return;
+    }
 
     const { berat, subtotal, ongkir, total, layanan, pengambilan } = calculatePelangganTotals();
 
@@ -1601,9 +1627,9 @@ async function handleKirimPesananPelanggan(e) {
     dataset.unshift(newOrder);
     saveData();
 
-    // Simpan ke database Supabase
+    // Simpan ke database Supabase di latar belakang (tidak menahan popup)
     if (typeof insertTransactionToDB === 'function') {
-        await insertTransactionToDB(newOrder);
+        insertTransactionToDB(newOrder).catch(err => console.error('[Supabase] Simpan pesanan gagal:', err));
     }
 
     // Tampilkan Pop-Up Rincian Pesanan yang Mudah Dibaca
@@ -1628,11 +1654,11 @@ async function handleKirimPesananPelanggan(e) {
                 { label: 'Status Pesanan', value: 'Menunggu Konfirmasi Admin', isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-amber-50 text-amber-700 border border-amber-300' }
             ],
             primaryBtn: {
-                text: '💳 Lanjut Bayar QRIS & Rekening',
+                text: `💳 Lanjut Bayar via ${getPaymentView(normalizePaymentMethod(metode)).label}`,
                 class: 'flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm',
                 onClick: () => {
                     switchPelangganTab('pesanan');
-                    openQrisModal(total, resi);
+                    openQrisModal(total, resi, metode);
                 }
             },
             secondaryBtn: {
@@ -1730,11 +1756,12 @@ function renderPelangganOrders() {
         // Tombol Bayar QRIS jika belum lunas / masih menunggu konfirmasi
         let payBtn = '';
         if (item.statusBayar !== 'Lunas' && item.metode !== 'Tunai saat jemput/antar') {
-            const btnText = item.status === 'Menunggu Konfirmasi' ? 'Lihat QRIS / Bukti Rekening' : 'Bayar Sekarang via QRIS / Bank';
+            const payView = getPaymentView(normalizePaymentMethod(item.metode));
+            const btnText = item.status === 'Menunggu Konfirmasi' ? `Lihat Pembayaran ${payView.label}` : `Bayar Sekarang via ${payView.label}`;
             payBtn = `
                 <div class="pt-2 border-t border-slate-100">
-                    <button onclick="openQrisModal(${item.total}, '${item.resi}')" class="w-full py-2 px-3 rounded-xl bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-800 text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm">
-                        <i class="fa-solid fa-qrcode"></i> ${btnText}
+                    <button onclick="openQrisModal(${item.total}, '${item.resi}', '${item.metode}')" class="w-full py-2 px-3 rounded-xl bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-800 text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm">
+                        <i class="${payView.icon}"></i> ${btnText}
                     </button>
                 </div>
             `;
@@ -1763,10 +1790,85 @@ function renderPelangganOrders() {
 // Modal Pop-up QRIS & Data Rekening (GoPay & Bank Jago dari QRIS.zip)
 let currentPayingResi = null;
 
-function openQrisModal(customNominal, resiOrLabel) {
+// Tentukan jenis metode dari teks metode yang tersimpan pada pesanan
+function normalizePaymentMethod(metode) {
+    const m = String(metode || '').toLowerCase();
+    if (m.includes('qris')) return 'qris';
+    if (m.includes('transfer') || m.includes('jago') || m.includes('bank')) return 'transfer';
+    if (m.includes('wallet') || m.includes('gopay') || m.includes('go-pay')) return 'ewallet';
+    return 'all';
+}
+
+// Tampilan popup pembayaran untuk tiap metode
+function getPaymentView(key) {
+    const views = {
+        qris: {
+            label: 'QRIS',
+            icon: 'fa-solid fa-qrcode',
+            title: 'Bayar via QRIS',
+            subtitle: 'Scan kode QRIS di bawah ini dengan aplikasi e-wallet atau mobile banking.',
+            hint: 'Pastikan nominal yang dibayar sama dengan total tagihan, lalu tekan "Saya Sudah Bayar".',
+            show: ['pay-card-qris']
+        },
+        transfer: {
+            label: 'Transfer Bank Jago',
+            icon: 'fa-solid fa-building-columns',
+            title: 'Bayar via Transfer Bank Jago',
+            subtitle: 'Transfer ke rekening resmi DMS Laundry di bawah ini.',
+            hint: 'Transfer sesuai total tagihan ke rekening Bank Jago, lalu tekan "Saya Sudah Bayar".',
+            show: ['pay-card-jago']
+        },
+        ewallet: {
+            label: 'GoPay',
+            icon: 'fa-solid fa-wallet',
+            title: 'Bayar via E-wallet (GoPay)',
+            subtitle: 'Kirim saldo GoPay ke nomor resmi DMS Laundry di bawah ini.',
+            hint: 'Kirim sesuai total tagihan ke nomor GoPay, lalu tekan "Saya Sudah Bayar".',
+            show: ['pay-card-gopay']
+        },
+        all: {
+            label: 'QRIS / Bank',
+            icon: 'fa-solid fa-qrcode',
+            title: 'Rincian Pembayaran',
+            subtitle: 'Scan QRIS atau transfer ke rekening resmi DMS Laundry.',
+            hint: '',
+            show: ['pay-card-qris', 'pay-card-gopay', 'pay-card-jago']
+        }
+    };
+    return views[key] || views.all;
+}
+
+function applyPaymentModalView(key) {
+    const view = getPaymentView(key);
+    ['pay-card-qris', 'pay-card-gopay', 'pay-card-jago'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('hidden', !view.show.includes(id));
+    });
+    const icon = document.getElementById('pay-modal-icon');
+    const title = document.getElementById('pay-modal-title');
+    const sub = document.getElementById('pay-modal-subtitle');
+    const hint = document.getElementById('pay-modal-hint');
+    if (icon) icon.className = view.icon;
+    if (title) title.innerText = view.title;
+    if (sub) sub.innerText = view.subtitle;
+    if (hint) {
+        hint.innerText = view.hint;
+        hint.classList.toggle('hidden', !view.hint);
+    }
+}
+
+function openQrisModal(customNominal, resiOrLabel, metode) {
     currentPayingResi = resiOrLabel || null;
     const modal = document.getElementById('modal-pembayaran-qris');
     if (!modal) return;
+
+    // Tentukan metode: dari parameter, atau dari data pesanan, atau tampilkan semua
+    let methodKey = metode ? normalizePaymentMethod(metode) : null;
+    if (!methodKey && resiOrLabel && Array.isArray(dataset)) {
+        const found = dataset.find(x => x.resi === resiOrLabel);
+        if (found) methodKey = normalizePaymentMethod(found.metode);
+    }
+    applyPaymentModalView(methodKey || 'all');
 
     let nominalText = 'Rp 24.000';
     if (customNominal) {
@@ -2231,7 +2333,6 @@ function showReceipt(item) {
         }
     }
 
-    document.getElementById('rec-diskon').innerText = `Rp ${(item.diskon || 0).toLocaleString('id-ID')}`;
     document.getElementById('rec-total').innerText = `Rp ${item.total.toLocaleString('id-ID')}`;
 
     document.getElementById('modal-receipt').classList.remove('hidden');
