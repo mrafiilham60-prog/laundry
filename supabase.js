@@ -211,6 +211,79 @@ async function insertUserToDB(userObj) {
     }
 }
 
+/**
+ * Mencari satu akun berdasarkan nomor HP / username (untuk fitur Lupa Kata Sandi)
+ * Mengembalikan null jika tidak ditemukan atau server tidak dapat dihubungi.
+ */
+async function findUserByHpFromDB(hpOrUsername) {
+    const clean = String(hpOrUsername || '').trim();
+    if (!clean) return null;
+
+    if (supabaseClient) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('users')
+                .select('*')
+                .or(`username.eq."${clean}",hp.eq."${clean}"`)
+                .limit(1);
+            if (!error && Array.isArray(data) && data.length > 0) return data[0];
+        } catch (err) {
+            console.warn('[Supabase SDK] Cari akun gagal:', err.message);
+        }
+    }
+
+    try {
+        const list = await supabaseRest(`users?select=*&or=(username.eq.${encodeURIComponent(clean)},hp.eq.${encodeURIComponent(clean)})&limit=1`);
+        if (Array.isArray(list) && list.length > 0) return list[0];
+    } catch (err) {
+        console.warn('[Supabase REST] Cari akun gagal:', err.message);
+    }
+    return null;
+}
+
+/**
+ * Mengubah kata sandi akun di Supabase.
+ * Dianggap berhasil HANYA jika ada baris yang benar-benar terupdate
+ * (jika izin UPDATE tabel users diblokir, hasilnya 0 baris dan dilaporkan gagal).
+ */
+async function updateUserPasswordInDB(user, newPassword) {
+    if (!user) return { success: false, error: 'Akun tidak ditemukan' };
+    const useId = user.id !== undefined && user.id !== null;
+    const col = useId ? 'id' : (user.hp ? 'hp' : 'username');
+    const val = useId ? user.id : (user.hp || user.username);
+    if (val === undefined || val === null || val === '') return { success: false, error: 'Identitas akun tidak lengkap' };
+
+    if (supabaseClient) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('users')
+                .update({ password: newPassword })
+                .eq(col, val)
+                .select();
+            if (!error && Array.isArray(data) && data.length > 0) {
+                showCloudToast('Kata sandi berhasil diperbarui di Supabase Cloud!');
+                return { success: true };
+            }
+        } catch (err) {
+            console.warn('[Supabase SDK] Ubah kata sandi gagal, mencoba REST...', err.message);
+        }
+    }
+
+    try {
+        const data = await supabaseRest(`users?${col}=eq.${encodeURIComponent(val)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ password: newPassword })
+        });
+        if (Array.isArray(data) && data.length > 0) {
+            showCloudToast('Kata sandi berhasil diperbarui di Supabase Cloud!');
+            return { success: true };
+        }
+        return { success: false, error: 'tidak ada akun yang terupdate, periksa izin UPDATE pada tabel users' };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+}
+
 // ========================================================
 // OPERASI DATABASE TRANSAKSI (ORDERS)
 // ========================================================

@@ -90,7 +90,7 @@
                         <div>
                             <h3 class="text-sm font-bold text-slate-900">Cek status cucian</h3>
                             <label class="block text-xs text-slate-500 mt-2 mb-1.5">Nomor pesanan</label>
-                            <input type="text" id="public-tracking-input" placeholder="mis. LD-0001" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-teal-700 uppercase font-mono">
+                            <input type="text" id="public-tracking-input" placeholder="mis. LD-7K3Q9X" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-teal-700 uppercase font-mono">
                         </div>
 
                         <button onclick="trackPublicResi()" class="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs shadow-sm transition">
@@ -205,6 +205,10 @@
                         <input type="password" id="login-password" required placeholder="••••••••" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-teal-700 transition">
                     </div>
 
+                    <div class="flex justify-end -mt-1">
+                        <button type="button" onclick="openForgotPasswordModal()" class="text-[11px] text-teal-700 hover:underline font-semibold">Lupa kata sandi?</button>
+                    </div>
+
                     <button type="submit" id="btn-login-submit" class="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-3 rounded-xl text-xs shadow-sm transition">
                         Masuk
                     </button>
@@ -289,10 +293,15 @@
                             <span class="text-xl font-bold tracking-tight text-white">DMS Laundry</span>
                             <div class="text-[11px] text-teal-400 mt-0.5">Kasir: <span id="admin-sidebar-name">Admin</span></div>
                         </div>
-                        <!-- Mobile Logout -->
-                        <button onclick="handleLogout()" class="md:hidden text-xs text-slate-400 hover:text-rose-400 flex items-center gap-1.5 transition">
-                            <i class="fa-solid fa-right-from-bracket"></i> Keluar
-                        </button>
+                        <!-- Mobile: Ganti Kata Sandi & Logout -->
+                        <div class="md:hidden flex items-center gap-3">
+                            <button onclick="openChangePasswordModal()" class="text-xs text-slate-400 hover:text-teal-300 flex items-center gap-1.5 transition">
+                                <i class="fa-solid fa-key"></i> Ganti Sandi
+                            </button>
+                            <button onclick="handleLogout()" class="text-xs text-slate-400 hover:text-rose-400 flex items-center gap-1.5 transition">
+                                <i class="fa-solid fa-right-from-bracket"></i> Keluar
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Navigation Items -->
@@ -307,10 +316,15 @@
                     </nav>
                 </div>
 
-                <!-- Desktop Bottom Logout -->
-                <button onclick="handleLogout()" class="hidden md:flex text-xs text-slate-400 hover:text-rose-400 text-left py-2 items-center gap-2 transition">
-                    <i class="fa-solid fa-right-from-bracket"></i> Keluar
-                </button>
+                <!-- Desktop Bottom: Ganti Kata Sandi & Logout -->
+                <div class="hidden md:flex flex-col">
+                    <button onclick="openChangePasswordModal()" class="text-xs text-slate-400 hover:text-teal-300 text-left py-2 flex items-center gap-2 transition">
+                        <i class="fa-solid fa-key"></i> Ganti Kata Sandi
+                    </button>
+                    <button onclick="handleLogout()" class="text-xs text-slate-400 hover:text-rose-400 text-left py-2 flex items-center gap-2 transition">
+                        <i class="fa-solid fa-right-from-bracket"></i> Keluar
+                    </button>
+                </div>
             </aside>
 
             <!-- Main Content Area -->
@@ -320,7 +334,7 @@
                     <div>
                         <h1 class="text-2xl font-bold text-slate-900">Order di toko</h1>
                         <p class="text-xs text-slate-500 mt-1">
-                            Kasir: <span id="kasir-name-display" class="font-semibold text-slate-700">Administrator</span> · Resi otomatis: <span id="auto-resi-display" class="font-bold text-teal-700 font-mono">LD-0004</span>
+                            Kasir: <span id="kasir-name-display" class="font-semibold text-slate-700">Administrator</span> · Resi otomatis: <span id="auto-resi-display" class="font-bold text-teal-700 font-mono">LD-......</span>
                         </p>
                     </div>
 
@@ -369,7 +383,7 @@
                                             <tr>
                                                 <td class="py-2.5 font-medium text-slate-800">Cuci Kiloan</td>
                                                 <td class="py-2.5">
-                                                    <input type="number" id="qty-kiloan" min="0" step="0.5" value="0" oninput="calculateKasirTotals()" class="w-20 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center font-semibold"> kg
+                                                    <input type="number" id="qty-kiloan" min="0" max="15" step="0.5" value="0" oninput="calculateKasirTotals()" class="w-20 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center font-semibold"> kg
                                                 </td>
                                                 <td class="py-2.5 text-slate-500">Rp 7.000</td>
                                                 <td id="subtotal-kiloan-text" class="py-2.5 text-right font-semibold text-slate-800">Rp 0</td>
@@ -377,7 +391,7 @@
                                             <tr>
                                                 <td class="py-2.5 font-medium text-slate-800">Express (H+4 Jam)</td>
                                                 <td class="py-2.5">
-                                                    <input type="number" id="qty-express" min="0" step="0.5" value="0" oninput="calculateKasirTotals()" class="w-20 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center font-semibold"> kg
+                                                    <input type="number" id="qty-express" min="0" max="5" step="0.5" value="0" oninput="calculateKasirTotals()" class="w-20 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center font-semibold"> kg
                                                 </td>
                                                 <td class="py-2.5 text-slate-500">Rp 10.000</td>
                                                 <td id="subtotal-express-text" class="py-2.5 text-right font-semibold text-slate-800">Rp 0</td>
@@ -603,6 +617,9 @@
 
                     <div class="flex items-center space-x-2 sm:space-x-3 text-xs">
                         <span class="text-slate-500 hidden md:inline">Pelanggan · <strong id="pelanggan-name-nav" class="text-slate-800">Rina</strong></span>
+                        <button onclick="openChangePasswordModal()" class="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-teal-400 text-slate-600 hover:text-teal-700 font-semibold transition text-xs flex items-center gap-1.5 shadow-sm">
+                            <i class="fa-solid fa-key text-[11px]"></i> <span class="hidden sm:inline">Ganti Sandi</span>
+                        </button>
                         <button onclick="handleLogout()" class="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-rose-300 text-slate-600 hover:text-rose-600 font-semibold transition text-xs flex items-center gap-1.5 shadow-sm">
                             <i class="fa-solid fa-right-from-bracket text-[11px]"></i> <span>Keluar</span>
                         </button>
@@ -617,6 +634,15 @@
                     <div>
                         <h1 class="text-2xl font-bold text-slate-900">Buat pesanan</h1>
                         <p class="text-xs text-slate-500 mt-1">Semua layanan sudah termasuk setrika.</p>
+                    </div>
+
+                    <!-- Banner jam kerja (tampil otomatis saat toko tutup) -->
+                    <div id="pelanggan-jamkerja-banner" class="hidden p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 flex items-start gap-2.5">
+                        <i class="fa-solid fa-moon mt-0.5 text-indigo-600"></i>
+                        <div class="space-y-0.5">
+                            <div class="font-bold text-indigo-800">Saat ini di luar jam kerja (08.00 - 20.00 WIB)</div>
+                            <p id="pelanggan-jamkerja-text" class="text-[11px] text-indigo-700"></p>
+                        </div>
                     </div>
 
                     <form id="form-pesanan-pelanggan" onsubmit="handleKirimPesananPelanggan(event)" class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-5">
@@ -680,12 +706,13 @@
                         <div class="space-y-1.5">
                             <div class="flex justify-between items-center">
                                 <label class="text-xs font-bold text-slate-800">Estimasi Berat Cucian</label>
-                                <span class="text-[11px] font-semibold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">Minimal order 1 kg</span>
+                                <span id="pelanggan-berat-hint" class="text-[11px] font-semibold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">Minimal order 1 kg</span>
                             </div>
                             <div class="flex items-center gap-2">
                                 <input type="number" id="pelanggan-berat" min="1" step="0.5" value="3" oninput="calculatePelangganTotals()" class="w-28 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-teal-700">
                                 <span class="text-xs text-slate-500 font-semibold">kg</span>
                             </div>
+                            <p id="pelanggan-berat-info" class="mt-2 text-[11px] text-slate-500"></p>
                         </div>
 
                         <!-- TAMPILAN 1: BOX KHUSUS EXPRESS (TAMPILKAN JAM PENJEMPUTAN & PENGANTARAN) -->
@@ -704,13 +731,13 @@
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
                                 <div class="p-3 bg-white rounded-xl border border-amber-200 shadow-sm space-y-1">
                                     <span id="express-label-jemput" class="text-[10px] text-slate-500 block font-semibold flex items-center gap-1"><i class="fa-solid fa-truck-pickup text-amber-600"></i> Jam Penjemputan Kurir:</span>
-                                    <span id="express-jam-jemput" class="font-extrabold text-slate-900 font-mono text-xs block">Hari ini, Segera (~30 Menit)</span>
-                                    <span id="express-desc-jemput" class="text-[10px] text-slate-400 block">Kurir segera datang ke alamat Anda</span>
+                                    <span id="express-jam-jemput" class="font-extrabold text-slate-900 font-mono text-xs block">15 menit setelah pesanan terverifikasi</span>
+                                    <span id="express-desc-jemput" class="text-[10px] text-slate-400 block">Kurir datang ke alamat Anda setelah admin memverifikasi pesanan</span>
                                 </div>
                                 <div class="p-3 bg-white rounded-xl border border-amber-200 shadow-sm space-y-1">
-                                    <span id="express-label-antar" class="text-[10px] text-slate-500 block font-semibold flex items-center gap-1"><i class="fa-solid fa-house text-emerald-600"></i> Tentukan Hari & Jam Pengantaran (Selesai):</span>
-                                    <span id="express-jam-antar" class="font-extrabold text-teal-800 font-mono text-xs block">Hari ini, 16:30 WIB</span>
-                                    <span id="express-desc-antar" class="text-[10px] text-emerald-700 font-semibold block">H+4 Jam langsung diantar kembali oleh kurir</span>
+                                    <span id="express-label-antar" class="text-[10px] text-slate-500 block font-semibold flex items-center gap-1"><i class="fa-solid fa-house text-emerald-600"></i> Estimasi Selesai (4 Jam Kerja):</span>
+                                    <span id="express-jam-antar" class="font-extrabold text-teal-800 font-mono text-xs block">4 jam kerja setelah pakaian diterima di toko</span>
+                                    <span id="express-desc-antar" class="text-[10px] text-emerald-700 font-semibold block">Dihitung sejak pakaian diterima di toko; jamnya muncul setelah dikonfirmasi admin, lalu diantar kembali oleh kurir</span>
                                 </div>
                             </div>
                         </div>
@@ -776,8 +803,8 @@
                                 <button type="button" onclick="selectPelangganRadio('metode', 'E-wallet', this)" class="radio-pill text-left">
                                     <span class="radio-dot"></span> E-wallet (GoPay)
                                 </button>
-                                <button type="button" onclick="selectPelangganRadio('metode', 'Tunai saat jemput/antar', this)" class="radio-pill text-left">
-                                    <span class="radio-dot"></span> Tunai saat jemput/antar
+                                <button type="button" id="pelanggan-pill-tunai" onclick="selectPelangganRadio('metode', getCashMethodLabel(), this)" class="radio-pill text-left">
+                                    <span class="radio-dot"></span> <span id="pelanggan-pill-tunai-label">Tunai ke kurir</span>
                                 </button>
                             </div>
                             <input type="hidden" id="pelanggan-metode-val" value="Transfer">
@@ -830,10 +857,15 @@
                             <span class="text-xl font-bold tracking-tight text-white">DMS Laundry</span>
                             <div class="text-[11px] text-teal-400 mt-0.5">Pemilik Usaha (Owner)</div>
                         </div>
-                        <!-- Mobile Logout -->
-                        <button onclick="handleLogout()" class="md:hidden text-xs text-slate-400 hover:text-rose-400 flex items-center gap-1.5 transition">
-                            <i class="fa-solid fa-right-from-bracket"></i> Keluar
-                        </button>
+                        <!-- Mobile: Ganti Kata Sandi & Logout -->
+                        <div class="md:hidden flex items-center gap-3">
+                            <button onclick="openChangePasswordModal()" class="text-xs text-slate-400 hover:text-teal-300 flex items-center gap-1.5 transition">
+                                <i class="fa-solid fa-key"></i> Ganti Sandi
+                            </button>
+                            <button onclick="handleLogout()" class="text-xs text-slate-400 hover:text-rose-400 flex items-center gap-1.5 transition">
+                                <i class="fa-solid fa-right-from-bracket"></i> Keluar
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Navigation Items -->
@@ -847,10 +879,15 @@
                     </nav>
                 </div>
 
-                <!-- Desktop Bottom Logout -->
-                <button onclick="handleLogout()" class="hidden md:flex text-xs text-slate-400 hover:text-rose-400 text-left py-2 items-center gap-2 transition">
-                    <i class="fa-solid fa-right-from-bracket"></i> Keluar
-                </button>
+                <!-- Desktop Bottom: Ganti Kata Sandi & Logout -->
+                <div class="hidden md:flex flex-col">
+                    <button onclick="openChangePasswordModal()" class="text-xs text-slate-400 hover:text-teal-300 text-left py-2 flex items-center gap-2 transition">
+                        <i class="fa-solid fa-key"></i> Ganti Kata Sandi
+                    </button>
+                    <button onclick="handleLogout()" class="text-xs text-slate-400 hover:text-rose-400 text-left py-2 flex items-center gap-2 transition">
+                        <i class="fa-solid fa-right-from-bracket"></i> Keluar
+                    </button>
+                </div>
             </aside>
 
             <!-- Main Owner Content -->
@@ -1050,6 +1087,97 @@
             <button onclick="dismissLoginErrorModal()" class="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 rounded-xl text-xs transition">
                 Coba Lagi
             </button>
+        </div>
+    </div>
+
+    <!-- MODAL: GANTI KATA SANDI -->
+    <div id="modal-change-password" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm hidden transition-all duration-200">
+        <div class="max-w-sm w-full bg-white border border-slate-200 rounded-3xl p-6 shadow-xl animate-popup relative">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center"><i class="fa-solid fa-key"></i></div>
+                <div>
+                    <h3 class="text-base font-extrabold text-slate-900">Ganti Kata Sandi</h3>
+                    <p class="text-[11px] text-slate-500">Masukkan kata sandi lama, lalu kata sandi baru Anda.</p>
+                </div>
+            </div>
+            <form id="form-change-password" onsubmit="handleChangePassword(event)" class="space-y-3">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">Kata sandi lama</label>
+                    <input type="password" id="cp-old" required autocomplete="current-password" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-teal-700 transition">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">Kata sandi baru</label>
+                    <input type="password" id="cp-new" required autocomplete="new-password" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-teal-700 transition">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">Ulangi kata sandi baru</label>
+                    <input type="password" id="cp-confirm" required autocomplete="new-password" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-teal-700 transition">
+                </div>
+                <label class="flex items-center gap-2 text-[11px] text-slate-500 cursor-pointer">
+                    <input type="checkbox" id="cp-show" onchange="togglePasswordFields(['cp-old','cp-new','cp-confirm'], this.checked)"> Tampilkan kata sandi
+                </label>
+                <p class="text-[10px] text-slate-500">Minimal 6 karakter, kombinasi huruf kapital, huruf kecil, dan angka.</p>
+                <p id="cp-error" class="hidden text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 leading-relaxed"></p>
+                <div class="flex gap-2 pt-1">
+                    <button type="button" onclick="closeChangePasswordModal()" class="flex-1 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold py-2.5 rounded-xl text-xs transition">Batal</button>
+                    <button type="submit" id="cp-submit" class="flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm disabled:opacity-60">Simpan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: LUPA KATA SANDI -->
+    <div id="modal-forgot-password" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm hidden transition-all duration-200">
+        <div class="max-w-sm w-full bg-white border border-slate-200 rounded-3xl p-6 shadow-xl animate-popup relative">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center"><i class="fa-solid fa-unlock-keyhole"></i></div>
+                <div>
+                    <h3 class="text-base font-extrabold text-slate-900">Lupa Kata Sandi</h3>
+                    <p class="text-[11px] text-slate-500">Khusus akun pelanggan. Verifikasi data akun Anda terlebih dahulu.</p>
+                </div>
+            </div>
+
+            <!-- Langkah 1: verifikasi -->
+            <form id="form-forgot-verify" onsubmit="handleForgotVerify(event)" class="space-y-3">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">Nomor HP terdaftar</label>
+                    <input type="text" id="fp-hp" required placeholder="mis. 0812xxxxxxxx" inputmode="tel" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-teal-700 transition">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">Nama lengkap sesuai pendaftaran</label>
+                    <input type="text" id="fp-nama" required placeholder="Nama Anda" autocomplete="name" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-teal-700 transition">
+                </div>
+                <p id="fp-error" class="hidden text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 leading-relaxed"></p>
+                <div class="flex gap-2 pt-1">
+                    <button type="button" onclick="closeForgotPasswordModal()" class="flex-1 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold py-2.5 rounded-xl text-xs transition">Batal</button>
+                    <button type="submit" id="fp-verify-btn" class="flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm disabled:opacity-60">Lanjut</button>
+                </div>
+            </form>
+
+            <!-- Langkah 2: kata sandi baru -->
+            <form id="form-forgot-reset" onsubmit="handleForgotReset(event)" class="hidden space-y-3">
+                <div class="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] text-emerald-800 flex items-center gap-2">
+                    <i class="fa-solid fa-circle-check text-emerald-600"></i>
+                    <span>Data cocok: <strong id="fp-account-info"></strong></span>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">Kata sandi baru</label>
+                    <input type="password" id="fp-new" required autocomplete="new-password" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-teal-700 transition">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">Ulangi kata sandi baru</label>
+                    <input type="password" id="fp-confirm" required autocomplete="new-password" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-teal-700 transition">
+                </div>
+                <label class="flex items-center gap-2 text-[11px] text-slate-500 cursor-pointer">
+                    <input type="checkbox" id="fp-show" onchange="togglePasswordFields(['fp-new','fp-confirm'], this.checked)"> Tampilkan kata sandi
+                </label>
+                <p class="text-[10px] text-slate-500">Minimal 6 karakter, kombinasi huruf kapital, huruf kecil, dan angka.</p>
+                <p id="fp-error2" class="hidden text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 leading-relaxed"></p>
+                <div class="flex gap-2 pt-1">
+                    <button type="button" onclick="closeForgotPasswordModal()" class="flex-1 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold py-2.5 rounded-xl text-xs transition">Batal</button>
+                    <button type="submit" id="fp-reset-btn" class="flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm disabled:opacity-60">Simpan Kata Sandi</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -1321,7 +1449,8 @@
                         <option value="Transfer">Transfer (Bank Jago)</option>
                         <option value="QRIS">QRIS</option>
                         <option value="E-wallet">E-wallet (GoPay)</option>
-                        <option value="Tunai saat jemput/antar">Tunai saat jemput/antar</option>
+                        <option value="Tunai ke kurir">Tunai ke kurir</option>
+                        <option value="Tunai saat jemput/antar">Tunai saat jemput/antar (lama)</option>
                     </select>
                 </div>
 

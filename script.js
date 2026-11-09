@@ -24,6 +24,295 @@ function saveUsers() {
 }
 
 // ========================================================
+// JAM KERJA (08.00 - 20.00 WIB) & ANTREAN PESANAN
+// Semua perhitungan memakai WIB (UTC+7), bukan jam perangkat pelanggan.
+// Pesanan yang masuk di luar jam kerja otomatis ditandai "Ditangani mulai ..." pada kolom jam
+// (ikut tersimpan di Supabase) dan otomatis dianggap siap ditangani saat toko buka.
+// ========================================================
+const WORK_OPEN_MIN = 8 * 60;     // 08:00
+const WORK_CLOSE_MIN = 20 * 60;   // 20:00 (tutup)
+const WIB_OFFSET_MS = 7 * 3600000;
+const WIB_DAYS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+const WIB_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+const QUEUE_ACTIVE_STATUSES = ['Baru', 'Menunggu Konfirmasi'];
+const QUEUE_TAG_RE = /\s*(?:•\s*)?Ditangani mulai (\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}) WIB/;
+const COURIER_TAG_RE = /\s*(?:•\s*)?Kurir tiba (\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}) WIB/;
+const COURIER_PICKUP_DELAY_MIN = 15; // kurir menjemput 15 menit setelah pesanan terverifikasi
+const EXPRESS_HOURS_MIN = 4 * 60;    // Express selesai 4 jam KERJA sejak pakaian diterima di toko
+const EXPRESS_PENDING_TEXT = '4 jam kerja setelah pakaian diterima di toko';
+const EXPRESS_TAG_RE = /\s*(?:•\s*)?Target selesai (\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}) WIB/;
+const EXPRESS_DONE_STATUSES = ['Selesai', 'Siap diantar', 'Siap diambil'];
+
+function padWib(n) { return String(n).padStart(2, '0'); }
+function wib(d) { return new Date(d.getTime() + WIB_OFFSET_MS); }                       // baca dengan getUTC*
+function wibToDate(y, m, d, hh, mm) { return new Date(Date.UTC(y, m, d, hh, mm) - WIB_OFFSET_MS); }
+
+function isWithinWorkingHours(d = new Date()) {
+    const w = wib(d);
+    const mins = w.getUTCHours() * 60 + w.getUTCMinutes();
+    return mins >= WORK_OPEN_MIN && mins < WORK_CLOSE_MIN;
+}
+
+// Jika toko sedang buka -> waktu itu sendiri; jika tutup -> jam buka berikutnya
+function getNextOpening(d = new Date()) {
+    const w = wib(d);
+    const mins = w.getUTCHours() * 60 + w.getUTCMinutes();
+    if (mins < WORK_OPEN_MIN) return wibToDate(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), 8, 0);
+    if (mins >= WORK_CLOSE_MIN) return wibToDate(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate() + 1, 8, 0);
+    return d;
+}
+
+// Menambah menit KERJA saja (di luar 08.00 - 20.00 tidak dihitung)
+function addWorkingMinutes(d, minutes) {
+    let cur = getNextOpening(d);
+    let remaining = minutes;
+    for (let i = 0; i < 14; i++) {
+        const w = wib(cur);
+        const close = wibToDate(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), 20, 0);
+        const avail = Math.floor((close.getTime() - cur.getTime()) / 60000);
+        if (remaining < avail) return new Date(cur.getTime() + remaining * 60000);
+        remaining -= avail;
+        cur = wibToDate(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate() + 1, 8, 0);
+    }
+    return cur;
+}
+
+function formatWibClock(d) {
+    const w = wib(d);
+    return `${padWib(w.getUTCHours())}:${padWib(w.getUTCMinutes())}`;
+}
+function wibDayNumber(d) {
+    const w = wib(d);
+    return Math.floor(Date.UTC(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate()) / 86400000);
+}
+function formatWibDayLabel(d, ref = new Date()) {
+    const diff = wibDayNumber(d) - wibDayNumber(ref);
+    if (diff === 0) return 'Hari ini';
+    if (diff === 1) return 'Besok';
+    const w = wib(d);
+    return `${WIB_DAYS[w.getUTCDay()]}, ${w.getUTCDate()} ${WIB_MONTHS[w.getUTCMonth()]}`;
+}
+function formatWibWhen(d, ref = new Date()) {
+    return `${formatWibDayLabel(d, ref)}, ${formatWibClock(d)} WIB`;
+}
+// Untuk kalimat: "pukul 10:15 WIB" / "besok pukul 08:10 WIB"
+function formatWibPukul(d, ref = new Date()) {
+    const day = formatWibDayLabel(d, ref);
+    const lead = day === 'Hari ini' ? '' : (day === 'Besok' ? 'besok ' : `${day} `);
+    return `${lead}pukul ${formatWibClock(d)} WIB`;
+}
+
+// Penanda antrean pada teks jadwal: "... • Ditangani mulai 08/11/2026 08:00 WIB"
+function appendQueueTag(jam, handleAt) {
+    const w = wib(handleAt);
+    const tag = `Ditangani mulai ${padWib(w.getUTCDate())}/${padWib(w.getUTCMonth() + 1)}/${w.getUTCFullYear()} ${formatWibClock(handleAt)} WIB`;
+    return jam ? `${jam} • ${tag}` : tag;
+}
+function getQueuedHandleTime(item) {
+    const m = item && typeof item.jam === 'string' ? item.jam.match(QUEUE_TAG_RE) : null;
+    return m ? wibToDate(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]) : null;
+}
+function displayJam(jam) {
+    if (typeof jam !== 'string') return jam;
+    return jam
+        .replace(new RegExp(QUEUE_TAG_RE.source, 'g'), '')
+        .replace(new RegExp(COURIER_TAG_RE.source, 'g'), '')
+        .replace(new RegExp(EXPRESS_TAG_RE.source, 'g'), '');
+}
+
+// ---- Penjemputan kurir: tiba = waktu verifikasi + 15 menit (dihitung dalam jam kerja) ----
+function isCourierOrder(item) { return !!item && item.tipe === 'Dijemput kurir'; }
+
+// Penanda pada teks jadwal: "... • Kurir tiba 08/11/2026 10:15 WIB" (menggantikan penanda antrean/penanda lama)
+function setCourierEtaTag(jam, eta) {
+    const w = wib(eta);
+    const tag = `Kurir tiba ${padWib(w.getUTCDate())}/${padWib(w.getUTCMonth() + 1)}/${w.getUTCFullYear()} ${formatWibClock(eta)} WIB`;
+    const base = String(displayJam(jam || '') || '').trim();
+    return base ? `${base} • ${tag}` : tag;
+}
+function getCourierEtaTime(item) {
+    const m = item && typeof item.jam === 'string' ? item.jam.match(COURIER_TAG_RE) : null;
+    return m ? wibToDate(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]) : null;
+}
+function getCourierEta(verifiedAt = new Date()) {
+    return addWorkingMinutes(verifiedAt, COURIER_PICKUP_DELAY_MIN);
+}
+// waiting = kurir belum waktunya tiba; due = sudah waktunya jemput
+function getCourierState(item, now = new Date()) {
+    if (!isCourierOrder(item) || item.status !== 'Dijemput') return null;
+    const at = getCourierEtaTime(item);
+    if (!at) return null;
+    return { state: at.getTime() > now.getTime() ? 'waiting' : 'due', at };
+}
+function getCourierBadgeHtml(item) {
+    const c = getCourierState(item);
+    if (!c) return '';
+    if (c.state === 'waiting') {
+        return `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 inline-flex items-center gap-1"><i class="fa-solid fa-motorcycle"></i> Kurir tiba ± ${formatWibPukul(c.at)}</span>`;
+    }
+    return `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 inline-flex items-center gap-1 animate-pulse"><i class="fa-solid fa-motorcycle"></i> Waktunya kurir jemput</span>`;
+}
+function getCourierMessage(item) {
+    if (!isCourierOrder(item)) return '';
+    if (['Menunggu Konfirmasi', 'Baru'].includes(item.status)) {
+        return `Kurir menjemput ${COURIER_PICKUP_DELAY_MIN} menit setelah pesanan diverifikasi admin.`;
+    }
+    const c = getCourierState(item);
+    if (!c) return '';
+    return c.state === 'waiting'
+        ? `Pesanan terverifikasi. Kurir menjemput sekitar ${formatWibPukul(c.at)} (${COURIER_PICKUP_DELAY_MIN} menit setelah verifikasi).`
+        : 'Kurir sedang menuju alamat Anda untuk menjemput cucian.';
+}
+function getCourierNoticeHtml(item) {
+    const msg = getCourierMessage(item);
+    if (!msg) return '';
+    return `
+                <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-start gap-2">
+                    <i class="fa-solid fa-motorcycle mt-0.5 text-blue-600"></i>
+                    <span class="text-[11px] text-blue-800">${msg}</span>
+                </div>
+            `;
+}
+function getCourierTrackLineHtml(item) {
+    const msg = getCourierMessage(item);
+    return msg ? `<p class="text-[10px] text-blue-700 mt-1">🛵 ${msg}</p>` : '';
+}
+
+// ---- Express: 4 jam kerja dihitung sejak pakaian DITERIMA di toko (status berubah ke Diproses) ----
+function isExpressOrder(item) { return !!item && /express/i.test(String(item.layanan || '')); }
+
+function getExpressTargetTime(item) {
+    const m = item && typeof item.jam === 'string' ? item.jam.match(EXPRESS_TAG_RE) : null;
+    return m ? wibToDate(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]) : null;
+}
+// Pesanan Express yang hitungan 4 jamnya belum dimulai (menunggu pakaian diterima di toko)
+function isExpressClockPending(item) {
+    return isExpressOrder(item) && typeof item.jam === 'string'
+        && item.jam.includes(EXPRESS_PENDING_TEXT) && !getExpressTargetTime(item);
+}
+function setExpressTargetTag(jam, target) {
+    const w = wib(target);
+    const tag = `Target selesai ${padWib(w.getUTCDate())}/${padWib(w.getUTCMonth() + 1)}/${w.getUTCFullYear()} ${formatWibClock(target)} WIB`;
+    const base = String(jam || '').replace(new RegExp(EXPRESS_TAG_RE.source, 'g'), '').trim();
+    return base ? `${base} • ${tag}` : tag;
+}
+// Dipanggil saat status berubah: mulai hitung 4 jam kerja ketika pesanan Express masuk status Diproses
+function maybeStartExpressClock(item, newStatus, prevStatus, startAt = new Date()) {
+    if (newStatus !== 'Diproses' || prevStatus === 'Diproses' || !isExpressClockPending(item)) return null;
+    const target = addWorkingMinutes(startAt, EXPRESS_HOURS_MIN);
+    item.jam = setExpressTargetTag(item.jam, target);
+    return target;
+}
+function getExpressBadgeHtml(item) {
+    if (!isExpressOrder(item)) return '';
+    const target = getExpressTargetTime(item);
+    if (!target) {
+        if (!isExpressClockPending(item) || item.status === 'Diproses' || EXPRESS_DONE_STATUSES.includes(item.status)) return '';
+        return `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-50 text-slate-600 border border-slate-200 inline-flex items-center gap-1"><i class="fa-solid fa-hourglass-start"></i> Express · hitungan 4 jam belum mulai</span>`;
+    }
+    if (item.status !== 'Diproses') return '';
+    if (target.getTime() > new Date().getTime()) {
+        return `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200 inline-flex items-center gap-1"><i class="fa-solid fa-stopwatch"></i> Express selesai ± ${formatWibPukul(target)}</span>`;
+    }
+    return `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 inline-flex items-center gap-1 animate-pulse"><i class="fa-solid fa-stopwatch"></i> Lewat target Express</span>`;
+}
+function getExpressMessage(item) {
+    if (!isExpressOrder(item)) return '';
+    const target = getExpressTargetTime(item);
+    if (!target) {
+        if (!isExpressClockPending(item) || EXPRESS_DONE_STATUSES.includes(item.status)) return '';
+        return 'Estimasi selesai Express (4 jam kerja) mulai dihitung setelah pakaian diterima di toko dan dikonfirmasi admin.';
+    }
+    if (item.status !== 'Diproses') return '';
+    return target.getTime() > new Date().getTime()
+        ? `Estimasi selesai: ${formatWibPukul(target)} (4 jam kerja sejak pakaian diterima di toko).`
+        : 'Cucian Express Anda sudah memasuki waktu target selesai dan segera diselesaikan.';
+}
+function getExpressNoticeHtml(item) {
+    const msg = getExpressMessage(item);
+    if (!msg) return '';
+    return `
+                <div class="p-2.5 bg-violet-50 border border-violet-200 rounded-xl text-xs text-violet-900 flex items-start gap-2">
+                    <i class="fa-solid fa-stopwatch mt-0.5 text-violet-600"></i>
+                    <span class="text-[11px] text-violet-800">${msg}</span>
+                </div>
+            `;
+}
+function getExpressTrackLineHtml(item) {
+    const msg = getExpressMessage(item);
+    return msg ? `<p class="text-[10px] text-violet-700 mt-1">⏱ ${msg}</p>` : '';
+}
+// waiting = belum waktunya ditangani; ready = sudah jam kerja tapi belum disentuh admin
+function getQueueState(item, now = new Date()) {
+    const at = getQueuedHandleTime(item);
+    if (!at || !item || !QUEUE_ACTIVE_STATUSES.includes(item.status)) return null;
+    return { state: at.getTime() > now.getTime() ? 'waiting' : 'ready', at };
+}
+function getQueueBadgeHtml(item) {
+    const q = getQueueState(item);
+    if (!q) return '';
+    if (q.state === 'waiting') {
+        return `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 inline-flex items-center gap-1"><i class="fa-solid fa-moon"></i> Antrean jam kerja · mulai ${formatWibWhen(q.at)}</span>`;
+    }
+    return `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 inline-flex items-center gap-1"><i class="fa-solid fa-sun"></i> Masuk di luar jam kerja · siap ditangani</span>`;
+}
+function getQueueNoticeHtml(item) {
+    const q = getQueueState(item);
+    if (!q || q.state !== 'waiting') return '';
+    return `
+                <div class="p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 space-y-0.5">
+                    <div class="font-bold flex items-center gap-1.5 text-indigo-800"><i class="fa-solid fa-moon"></i> Diterima di luar jam kerja</div>
+                    <p class="text-[11px] text-indigo-700">Jam kerja kami 08.00 - 20.00 WIB. Pesanan Anda otomatis masuk antrean dan ditangani mulai ${formatWibWhen(q.at)}.</p>
+                </div>
+            `;
+}
+function getQueueTrackLineHtml(item) {
+    const q = getQueueState(item);
+    if (!q || q.state !== 'waiting') return '';
+    return `<p class="text-[10px] text-indigo-700 mt-1">🌙 Pesanan masuk di luar jam kerja dan otomatis ditangani mulai ${formatWibWhen(q.at)}.</p>`;
+}
+
+// Banner di form pesanan pelanggan (hanya tampil saat toko tutup)
+function updateJamKerjaBanner() {
+    const box = document.getElementById('pelanggan-jamkerja-banner');
+    const text = document.getElementById('pelanggan-jamkerja-text');
+    if (!box) return;
+    const now = new Date();
+    if (isWithinWorkingHours(now)) {
+        box.classList.add('hidden');
+        return;
+    }
+    if (text) text.innerText = `Pesanan tetap bisa dibuat dan akan otomatis ditangani mulai ${formatWibWhen(getNextOpening(now), now)}.`;
+    box.classList.remove('hidden');
+}
+
+// Render ulang tampilan sesuai peran (dipakai setelah sinkron dan saat jam kerja tiba)
+function refreshRoleViews() {
+    if (!currentUser) return;
+    if (currentUser.role === 'admin') {
+        refreshNextAutoResi();
+        renderOnlineOrdersTable();
+    } else if (currentUser.role === 'pelanggan') {
+        renderPelangganOrders();
+    } else if (currentUser.role === 'owner') {
+        renderOwnerStats();
+        renderOwnerDetailedReport();
+    }
+}
+
+// Berjalan otomatis tiap 30 detik: perbarui banner, dan segarkan tampilan saat waktu penanganan tiba
+let lastQueueTick = Date.now();
+function workingHoursTick() {
+    const now = Date.now();
+    updateJamKerjaBanner();
+    const crossed = Array.isArray(dataset) && dataset.some(x =>
+        [getQueuedHandleTime(x), getCourierEtaTime(x), getExpressTargetTime(x)].some(t => t && t.getTime() > lastQueueTick && t.getTime() <= now)
+    );
+    lastQueueTick = now;
+    if (crossed) refreshRoleViews();
+}
+
+// ========================================================
 // PESANAN "BELUM TERKIRIM" KE SUPABASE
 // Pesanan baru dicatat di sini sampai berhasil masuk Supabase. Saat sinkron, hanya pesanan
 // inilah yang dipertahankan walau belum ada di server; selebihnya mengikuti isi Supabase
@@ -180,7 +469,7 @@ async function handleLogin(e) {
         try {
             const remoteUser = await loginUserFromDB(u, p);
             if (remoteUser) {
-                authUser = { role: remoteUser.role, nama: remoteUser.nama, hp: remoteUser.hp, id: remoteUser.id };
+                authUser = { role: remoteUser.role, nama: remoteUser.nama, hp: remoteUser.hp, id: remoteUser.id, username: remoteUser.username };
             }
         } catch (err) {
             console.warn('[Supabase] Gagal login via Supabase Cloud, mencoba fallback lokal:', err);
@@ -195,7 +484,7 @@ async function handleLogin(e) {
                 .maybeSingle();
 
             if (!error && data) {
-                authUser = { role: data.role, nama: data.nama, hp: data.hp, id: data.id };
+                authUser = { role: data.role, nama: data.nama, hp: data.hp, id: data.id, username: data.username };
             }
         } catch (err) {
             console.warn('[Supabase] Gagal login via Supabase Client:', err);
@@ -205,18 +494,18 @@ async function handleLogin(e) {
     // 2. Fallback Autentikasi Cache / Offline Lokal
     if (!authUser) {
         // Role: Admin Kasir
-        if (u.toLowerCase() === 'admin' && (p === 'Admin123' || p === 'admin123')) {
+        if (u.toLowerCase() === 'admin' && !hasStoredAccount('admin') && (p === 'Admin123' || p === 'admin123')) {
             authUser = { role: 'admin', nama: 'Administrator Kasir' };
         }
         // Role: Owner
-        else if (u.toLowerCase() === 'owner' && (p === 'Owner123' || p === 'owner123')) {
+        else if (u.toLowerCase() === 'owner' && !hasStoredAccount('owner') && (p === 'Owner123' || p === 'owner123')) {
             authUser = { role: 'owner', nama: 'Pemilik Usaha (Owner)' };
         }
         // Role: Pelanggan
         else {
             const found = users.find(x => (x.hp === u || (x.username && x.username === u) || x.nama.toLowerCase() === u.toLowerCase()) && x.password === p);
             if (found) {
-                authUser = { role: found.role || 'pelanggan', nama: found.nama, hp: found.hp };
+                authUser = { role: found.role || 'pelanggan', nama: found.nama, hp: found.hp, username: found.username };
             }
         }
     }
@@ -279,6 +568,281 @@ async function handleRegister(e) {
     currentUser = { role: 'pelanggan', nama, hp: cleanHp };
     sessionStorage.setItem('DMS_LAUNDRY_USER', JSON.stringify(currentUser));
     triggerLoginSuccess(currentUser, 'Akun pelanggan berhasil didaftarkan! Selamat datang di DMS Laundry.');
+}
+
+// ========================================================
+// GANTI KATA SANDI (setelah login) & LUPA KATA SANDI (di layar login)
+// Catatan: aplikasi ini menyimpan kata sandi apa adanya (tanpa enkripsi) pada tabel users.
+// ========================================================
+const FORGOT_KEY = 'DMS_LAUNDRY_FORGOT';
+const FORGOT_MAX_FAILS = 5;
+const FORGOT_LOCK_MS = 10 * 60 * 1000;
+let forgotVerifiedUser = null;
+
+// Kata sandi bawaan (admin/owner) hanya berlaku bila akun itu BELUM ada di tabel users,
+// supaya kata sandi yang sudah diganti tidak bisa dikalahkan oleh kata sandi bawaan di kode.
+function hasStoredAccount(name) {
+    const key = String(name).toLowerCase();
+    return Array.isArray(users) && users.some(x => String(x.username || '').toLowerCase() === key);
+}
+function findLocalUser(identifier) {
+    const key = String(identifier || '').trim().toLowerCase();
+    if (!key) return null;
+    return users.find(x => String(x.hp || '').toLowerCase() === key || String(x.username || '').toLowerCase() === key) || null;
+}
+// 0812xxxx dan 62812xxxx dianggap nomor yang sama
+function phoneVariants(clean) {
+    const v = new Set([clean]);
+    if (clean.startsWith('62')) v.add('0' + clean.slice(2));
+    if (clean.startsWith('08')) v.add('62' + clean.slice(1));
+    return [...v];
+}
+function validateNewPassword(password, confirm, oldPassword) {
+    if (password.length < 6) return 'Kata sandi baru minimal terdiri dari 6 karakter.';
+    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
+        return 'Kata sandi baru wajib memiliki kombinasi huruf kapital (A-Z), huruf nonkapital (a-z), dan angka (0-9).';
+    }
+    if (password !== confirm) return 'Konfirmasi kata sandi baru tidak cocok. Mohon ketik ulang dengan benar.';
+    if (oldPassword !== undefined && password === oldPassword) return 'Kata sandi baru harus berbeda dari kata sandi lama.';
+    return '';
+}
+function showInlineMessage(id, message) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (message) { el.innerText = message; el.classList.remove('hidden'); }
+    else { el.innerText = ''; el.classList.add('hidden'); }
+}
+function togglePasswordFields(ids, show) {
+    ids.forEach(id => { const el = document.getElementById(id); if (el) el.type = show ? 'text' : 'password'; });
+}
+function clearFields(ids) {
+    ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+}
+function setBusy(buttonId, busy, busyText) {
+    const btn = document.getElementById(buttonId);
+    if (!btn) return;
+    if (busy) { btn._label = btn.innerText; btn.innerText = busyText; btn.disabled = true; }
+    else { if (btn._label) btn.innerText = btn._label; btn.disabled = false; }
+}
+function updateLocalPassword(identifier, newPassword) {
+    const local = findLocalUser(identifier);
+    if (local) { local.password = newPassword; saveUsers(); }
+}
+
+// ---------------- Ganti kata sandi ----------------
+function openChangePasswordModal() {
+    if (!currentUser) return;
+    clearFields(['cp-old', 'cp-new', 'cp-confirm']);
+    togglePasswordFields(['cp-old', 'cp-new', 'cp-confirm'], false);
+    const chk = document.getElementById('cp-show');
+    if (chk) chk.checked = false;
+    showInlineMessage('cp-error', '');
+    const modal = document.getElementById('modal-change-password');
+    if (modal) modal.classList.remove('hidden');
+}
+function closeChangePasswordModal() {
+    const modal = document.getElementById('modal-change-password');
+    if (modal) modal.classList.add('hidden');
+    clearFields(['cp-old', 'cp-new', 'cp-confirm']);
+}
+
+async function handleChangePassword(e) {
+    e.preventDefault();
+    showInlineMessage('cp-error', '');
+    if (!currentUser) {
+        showInlineMessage('cp-error', 'Sesi Anda berakhir. Silakan login ulang.');
+        return;
+    }
+    const oldPw = document.getElementById('cp-old').value.trim();
+    const newPw = document.getElementById('cp-new').value.trim();
+    const confirmPw = document.getElementById('cp-confirm').value.trim();
+
+    const identifier = currentUser.hp || currentUser.username;
+    if (!identifier) {
+        showInlineMessage('cp-error', 'Akun ini memakai kredensial bawaan aplikasi dan belum tersimpan di Supabase, sehingga kata sandinya tidak dapat diubah dari sini. Tambahkan akunnya pada tabel users terlebih dahulu.');
+        return;
+    }
+    if (!oldPw) { showInlineMessage('cp-error', 'Kata sandi lama wajib diisi.'); return; }
+    const problem = validateNewPassword(newPw, confirmPw, oldPw);
+    if (problem) { showInlineMessage('cp-error', problem); return; }
+
+    setBusy('cp-submit', true, 'Menyimpan...');
+    try {
+        // 1. Verifikasi kata sandi lama (Supabase dulu, lalu salinan lokal)
+        let account = null;
+        if (typeof loginUserFromDB === 'function') {
+            try { account = await loginUserFromDB(identifier, oldPw); } catch (err) { /* lanjut ke lokal */ }
+        }
+        if (!account) {
+            const local = findLocalUser(identifier);
+            if (local && local.password === oldPw) account = local;
+        }
+        if (!account) { showInlineMessage('cp-error', 'Kata sandi lama salah.'); return; }
+
+        // 2. Simpan ke Supabase (dianggap berhasil hanya jika baris benar-benar terupdate)
+        const result = (typeof updateUserPasswordInDB === 'function')
+            ? await updateUserPasswordInDB(account, newPw)
+            : { success: false, error: 'Supabase tidak tersedia' };
+        if (!result.success) {
+            showInlineMessage('cp-error', `Kata sandi belum dapat disimpan ke server (${result.error || 'tidak diketahui'}). Periksa koneksi internet lalu coba lagi.`);
+            return;
+        }
+        updateLocalPassword(identifier, newPw);
+    } finally {
+        setBusy('cp-submit', false);
+    }
+
+    closeChangePasswordModal();
+    showReadableModal({
+        icon: 'fa-solid fa-circle-check text-emerald-600',
+        iconWrapClass: 'w-14 h-14 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm',
+        title: 'Kata Sandi Berhasil Diubah',
+        subtitle: 'Gunakan kata sandi baru Anda saat masuk berikutnya.',
+        rows: [],
+        primaryBtn: { text: 'Tutup', class: 'flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm' }
+    });
+}
+
+// ---------------- Lupa kata sandi ----------------
+function getForgotState() {
+    try {
+        const st = JSON.parse(localStorage.getItem(FORGOT_KEY) || '{}');
+        return { fails: st.fails || 0, until: st.until || 0 };
+    } catch (err) { return { fails: 0, until: 0 }; }
+}
+function saveForgotState(st) {
+    try { localStorage.setItem(FORGOT_KEY, JSON.stringify(st)); } catch (err) { /* abaikan */ }
+}
+function setForgotStep(step) {
+    const verify = document.getElementById('form-forgot-verify');
+    const reset = document.getElementById('form-forgot-reset');
+    if (verify) verify.classList.toggle('hidden', step !== 1);
+    if (reset) reset.classList.toggle('hidden', step !== 2);
+    showInlineMessage('fp-error', '');
+    showInlineMessage('fp-error2', '');
+}
+function openForgotPasswordModal() {
+    forgotVerifiedUser = null;
+    clearFields(['fp-hp', 'fp-nama', 'fp-new', 'fp-confirm']);
+    togglePasswordFields(['fp-new', 'fp-confirm'], false);
+    const chk = document.getElementById('fp-show');
+    if (chk) chk.checked = false;
+    // isi otomatis dari kolom login jika terlihat seperti nomor HP
+    const typed = ((document.getElementById('login-username') || {}).value || '').trim();
+    const hpEl = document.getElementById('fp-hp');
+    if (hpEl && /^[0-9+\s-]{8,}$/.test(typed)) hpEl.value = typed;
+    setForgotStep(1);
+    const modal = document.getElementById('modal-forgot-password');
+    if (modal) modal.classList.remove('hidden');
+}
+function closeForgotPasswordModal() {
+    forgotVerifiedUser = null;
+    const modal = document.getElementById('modal-forgot-password');
+    if (modal) modal.classList.add('hidden');
+    clearFields(['fp-hp', 'fp-nama', 'fp-new', 'fp-confirm']);
+}
+
+async function handleForgotVerify(e) {
+    e.preventDefault();
+    showInlineMessage('fp-error', '');
+    const state = getForgotState();
+    const now = Date.now();
+    if (state.until > now) {
+        showInlineMessage('fp-error', `Terlalu banyak percobaan. Coba lagi dalam ${Math.ceil((state.until - now) / 60000)} menit.`);
+        return;
+    }
+
+    const hpRaw = document.getElementById('fp-hp').value.trim();
+    const namaIn = document.getElementById('fp-nama').value.trim();
+    const phoneCheck = validateIndonesianPhone(hpRaw);
+    if (!phoneCheck.valid) { showInlineMessage('fp-error', phoneCheck.message); return; }
+    if (!namaIn) { showInlineMessage('fp-error', 'Nama lengkap wajib diisi.'); return; }
+
+    setBusy('fp-verify-btn', true, 'Memeriksa...');
+    let account = null;
+    try {
+        for (const variant of phoneVariants(phoneCheck.cleanNumber)) {
+            if (typeof findUserByHpFromDB === 'function') {
+                try { account = await findUserByHpFromDB(variant); } catch (err) { /* lanjut ke lokal */ }
+            }
+            if (!account) account = findLocalUser(variant);
+            if (account) break;
+        }
+    } finally {
+        setBusy('fp-verify-btn', false);
+    }
+
+    // Hanya akun pelanggan yang boleh direset mandiri (admin/owner tidak)
+    const matches = !!account
+        && String(account.role || 'pelanggan') === 'pelanggan'
+        && String(account.nama || '').trim().toLowerCase() === namaIn.toLowerCase();
+
+    if (!matches) {
+        const fails = state.fails + 1;
+        const locked = fails >= FORGOT_MAX_FAILS;
+        saveForgotState({ fails: locked ? 0 : fails, until: locked ? now + FORGOT_LOCK_MS : 0 });
+        showInlineMessage('fp-error', locked
+            ? `Terlalu banyak percobaan. Coba lagi dalam ${FORGOT_LOCK_MS / 60000} menit.`
+            : `Nomor HP dan nama lengkap tidak cocok dengan data akun pelanggan. Sisa percobaan: ${FORGOT_MAX_FAILS - fails}. Akun admin/owner tidak dapat direset lewat halaman ini.`);
+        return;
+    }
+
+    saveForgotState({ fails: 0, until: 0 });
+    forgotVerifiedUser = account;
+    const info = document.getElementById('fp-account-info');
+    if (info) info.innerText = `${account.nama} · ${account.hp || account.username}`;
+    setForgotStep(2);
+}
+
+async function handleForgotReset(e) {
+    e.preventDefault();
+    showInlineMessage('fp-error2', '');
+    if (!forgotVerifiedUser) {
+        setForgotStep(1);
+        showInlineMessage('fp-error', 'Verifikasi data akun diperlukan terlebih dahulu.');
+        return;
+    }
+    const newPw = document.getElementById('fp-new').value.trim();
+    const confirmPw = document.getElementById('fp-confirm').value.trim();
+    const problem = validateNewPassword(newPw, confirmPw, forgotVerifiedUser.password);
+    if (problem) { showInlineMessage('fp-error2', problem); return; }
+
+    const account = forgotVerifiedUser;
+    const identifier = account.hp || account.username;
+    setBusy('fp-reset-btn', true, 'Menyimpan...');
+    try {
+        const result = (typeof updateUserPasswordInDB === 'function')
+            ? await updateUserPasswordInDB(account, newPw)
+            : { success: false, error: 'Supabase tidak tersedia' };
+        if (!result.success) {
+            showInlineMessage('fp-error2', `Kata sandi belum dapat disimpan ke server (${result.error || 'tidak diketahui'}). Periksa koneksi internet lalu coba lagi.`);
+            return;
+        }
+        updateLocalPassword(identifier, newPw);
+    } finally {
+        setBusy('fp-reset-btn', false);
+    }
+
+    forgotVerifiedUser = null;
+    closeForgotPasswordModal();
+    showReadableModal({
+        icon: 'fa-solid fa-circle-check text-emerald-600',
+        iconWrapClass: 'w-14 h-14 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm',
+        title: 'Kata Sandi Berhasil Diubah',
+        subtitle: 'Silakan masuk memakai kata sandi baru Anda.',
+        rows: [],
+        primaryBtn: {
+            text: 'Masuk Sekarang',
+            class: 'flex-1 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm',
+            onClick: () => {
+                if (typeof switchAuthTab === 'function') switchAuthTab('login');
+                const u = document.getElementById('login-username');
+                const p = document.getElementById('login-password');
+                if (u) u.value = identifier;
+                if (p) { p.value = ''; if (p.focus) p.focus(); }
+            }
+        }
+    });
 }
 
 // Pop-up Login Berhasil (1 Detik)
@@ -491,6 +1055,8 @@ function initDashboardView() {
         if (pName) pName.innerText = currentUser.nama;
         switchPelangganTab('buat');
         initPelangganJadwal();
+        updateJamKerjaBanner();
+        updateCashMethodOption();
         renderPelangganOrders();
     } else if (currentUser.role === 'owner') {
         const vOwn = document.getElementById('view-owner');
@@ -548,6 +1114,7 @@ function trackPublicResi() {
                 Layanan: ${item.layanan} (${item.berat} kg) · Pembayaran: ${item.metode} (${item.statusBayar})
             </div>
             <p class="text-[10px] text-amber-700 mt-1">Pembayaran pesanan Anda sedang diverifikasi oleh admin kami sebelum proses pencucian dimulai.</p>
+            ${getQueueTrackLineHtml(item)}${getCourierTrackLineHtml(item)}${getExpressTrackLineHtml(item)}
         `;
         return;
     }
@@ -580,6 +1147,7 @@ function trackPublicResi() {
         <div class="text-[11px] text-teal-800">
             Layanan: ${item.layanan} (${item.berat} kg) · Pembayaran: ${item.metode} (${item.statusBayar})
         </div>
+        ${getQueueTrackLineHtml(item)}${getCourierTrackLineHtml(item)}${getExpressTrackLineHtml(item)}
     `;
 }
 
@@ -892,6 +1460,16 @@ async function handleKasirOrder(e) {
         return;
     }
 
+    // Validasi batas berat: Express maks 5 kg, Cuci Kiloan maks 15 kg
+    if (qtyExpress > MAX_KG_EXPRESS) {
+        triggerLoginError(`Maksimal order Express adalah ${MAX_KG_EXPRESS} kg. Kurangi berat Express atau pindahkan ke Cuci Kiloan.`, 'Berat Melebihi Batas');
+        return;
+    }
+    if (qtyKiloan > MAX_KG_NORMAL) {
+        triggerLoginError(`Maksimal order Cuci Kiloan adalah ${MAX_KG_NORMAL} kg per pesanan.`, 'Berat Melebihi Batas');
+        return;
+    }
+
     let nama = document.getElementById('kasir-cust-name').value.trim();
     let hp = document.getElementById('kasir-cust-hp').value.trim();
 
@@ -927,7 +1505,10 @@ async function handleKasirOrder(e) {
         berat: qtyKiloan + qtyExpress,
         tipe,
         alamat: finalAlamat,
-        jam: document.getElementById('kasir-estimasi').value,
+        // Express yang dijemput kurir: pakaian belum di toko, jadi 4 jam kerja dihitung nanti saat diterima
+        jam: (qtyExpress > 0 && tipe === 'Dijemput kurir')
+            ? `Estimasi selesai: ${EXPRESS_PENDING_TEXT}`
+            : document.getElementById('kasir-estimasi').value,
         catatan: '',
         subtotal,
         diskon: 0,
@@ -968,7 +1549,7 @@ async function handleKasirOrder(e) {
             { label: 'Layanan Cucian', value: item.layanan },
             { label: 'Total Pembayaran', value: `Rp ${item.total.toLocaleString('id-ID')}`, highlight: true },
             { label: 'Status Pembayaran', value: `${item.metode} (${item.statusBayar})`, isBadge: true, badgeClass: item.statusBayar === 'Lunas' ? 'px-2 py-0.5 rounded font-bold bg-emerald-50 text-emerald-700 border border-emerald-200' : 'px-2 py-0.5 rounded font-bold bg-rose-50 text-rose-700 border border-rose-200' },
-            { label: 'Estimasi Selesai', value: item.jam }
+            { label: 'Estimasi Selesai', value: displayJam(item.jam) }
         ],
         primaryBtn: {
             text: '🖨️ Cetak Struk Resi',
@@ -1055,6 +1636,14 @@ function renderOnlineOrdersTable() {
             statusBadge = `<span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1"><i class="fa-solid fa-check"></i>${item.status}</span>`;
         }
 
+        // Penanda antrean di luar jam kerja
+        const queueBadge = getQueueBadgeHtml(item);
+        if (queueBadge) statusBadge += `<div class="mt-1">${queueBadge}</div>`;
+        const courierBadge = getCourierBadgeHtml(item);
+        if (courierBadge) statusBadge += `<div class="mt-1">${courierBadge}</div>`;
+        const expressBadge = getExpressBadgeHtml(item);
+        if (expressBadge) statusBadge += `<div class="mt-1">${expressBadge}</div>`;
+
         // Payment Badges
         let bayarBadge = item.statusBayar === 'Lunas' ?
             `<span class="text-emerald-700 font-bold">Lunas</span>` :
@@ -1121,7 +1710,7 @@ function renderOnlineOrdersTable() {
                     <div class="font-bold text-slate-900">Rp ${(item.total || 0).toLocaleString('id-ID')}</div>
                     <div class="text-[11px] text-slate-500">${item.metode} · ${bayarBadge}</div>
                 </td>
-                <td class="p-4 text-slate-600 font-mono text-[11px]">${item.jam || '-'}</td>
+                <td class="p-4 text-slate-600 font-mono text-[11px]">${displayJam(item.jam) || '-'}</td>
                 <td class="p-4 whitespace-nowrap">${statusBadge}</td>
                 <td class="p-4 text-center">${actionBtn}</td>
             </tr>
@@ -1152,7 +1741,7 @@ function renderOnlineOrdersTable() {
                     </div>
                     <div class="flex justify-between">
                         <span class="text-slate-400">Jadwal / Estimasi:</span>
-                        <span class="font-semibold text-slate-800 font-mono text-[11px]">${item.jam || '-'}</span>
+                        <span class="font-semibold text-slate-800 font-mono text-[11px]">${displayJam(item.jam) || '-'}</span>
                     </div>
                     <div class="flex justify-between items-center pt-1 border-t border-slate-50">
                         <span class="text-slate-400">Total Biaya:</span>
@@ -1209,6 +1798,16 @@ async function submitAdminUpdateModal(e) {
     const newJam = document.getElementById('update-modal-jam').value.trim();
     const newCatatan = document.getElementById('update-modal-catatan').value.trim();
 
+    // Admin mengubah status ke Dijemput (pesanan kurir): kurir tiba 15 menit setelah verifikasi ini
+    const prevStatus = item.status;
+    let finalJam = newJam;
+    if (newStatus === 'Dijemput' && prevStatus !== 'Dijemput' && newTipe === 'Dijemput kurir' && !COURIER_TAG_RE.test(newJam)) {
+        finalJam = setCourierEtaTag(newJam, getCourierEta());
+    }
+    // Express: status diubah ke Diproses (pakaian diterima di toko) -> mulai hitung 4 jam kerja
+    const expressProbe = { layanan: item.layanan, jam: finalJam };
+    if (maybeStartExpressClock(expressProbe, newStatus, prevStatus)) finalJam = expressProbe.jam;
+
     // Update objek di dataset lokal
     item.tipe = newTipe;
     item.status = newStatus;
@@ -1216,7 +1815,7 @@ async function submitAdminUpdateModal(e) {
     item.metode = newMetode;
     item.berat = newBerat;
     item.total = newTotal;
-    item.jam = newJam;
+    item.jam = finalJam;
     item.catatan = newCatatan;
 
     saveData();
@@ -1235,7 +1834,7 @@ async function submitAdminUpdateModal(e) {
             metode: newMetode,
             berat: newBerat,
             total: newTotal,
-            jam: newJam,
+            jam: finalJam,
             catatan: newCatatan
         });
     }
@@ -1267,13 +1866,26 @@ async function submitAdminUpdateModal(e) {
 async function advanceOrderStatus(resi, newStatus) {
     const item = dataset.find(x => x.resi === resi);
     if (!item) return;
+    const prevStatus = item.status;
     item.status = newStatus;
     if (newStatus === 'Selesai') item.statusBayar = 'Lunas';
+
+    // Pesanan dijemput kurir: kurir tiba 15 menit setelah verifikasi (saat admin menekan tombol ini)
+    const courierEta = (newStatus === 'Dijemput' && isCourierOrder(item)) ? getCourierEta() : null;
+    if (courierEta) item.jam = setCourierEtaTag(item.jam, courierEta);
+
+    // Express: pakaian diterima di toko -> mulai hitung 4 jam kerja
+    const expressTarget = maybeStartExpressClock(item, newStatus, prevStatus);
+
     saveData();
     renderOnlineOrdersTable();
 
     // Sinkronkan update status ke Supabase
-    if (typeof updateTransactionStatusInDB === 'function') {
+    if ((courierEta || expressTarget) && typeof updateFullTransactionInDB === 'function') {
+        if (courierEta) showCloudToast(`Pesanan ${resi} terverifikasi. Kurir menjemput sekitar ${formatWibClock(courierEta)} WIB.`);
+        if (expressTarget) showCloudToast(`Pesanan Express ${resi} diterima. Estimasi selesai ${formatWibPukul(expressTarget)}.`);
+        await updateFullTransactionInDB(resi, { status: newStatus, status_bayar: item.statusBayar, jam: item.jam });
+    } else if (typeof updateTransactionStatusInDB === 'function') {
         await updateTransactionStatusInDB(resi, newStatus, item.statusBayar);
     }
 }
@@ -1283,29 +1895,44 @@ async function confirmAdminPayment(resi) {
     const item = dataset.find(x => x.resi === resi);
     if (!item) return;
 
-    item.status = 'Diproses';
+    // Pesanan dijemput kurir: setelah terverifikasi, kurir tiba 15 menit kemudian (status Dijemput)
+    const prevStatus = item.status;
+    const isCourier = isCourierOrder(item);
+    const courierEta = isCourier ? getCourierEta() : null;
+    item.status = isCourier ? 'Dijemput' : 'Diproses';
     item.statusBayar = 'Lunas';
+    if (courierEta) item.jam = setCourierEtaTag(item.jam, courierEta);
+    // Express non-kurir: dikonfirmasi -> Diproses, mulai hitung 4 jam kerja
+    const expressTarget = maybeStartExpressClock(item, item.status, prevStatus);
     saveData();
     renderOnlineOrdersTable();
 
     if (typeof renderOwnerStats === 'function') renderOwnerStats();
     if (typeof renderOwnerDetailedReport === 'function') renderOwnerDetailedReport();
 
-    if (typeof updateTransactionStatusInDB === 'function') {
-        await updateTransactionStatusInDB(resi, 'Diproses', 'Lunas');
+    if ((courierEta || expressTarget) && typeof updateFullTransactionInDB === 'function') {
+        await updateFullTransactionInDB(resi, { status: item.status, status_bayar: 'Lunas', jam: item.jam });
+    } else if (typeof updateTransactionStatusInDB === 'function') {
+        await updateTransactionStatusInDB(resi, item.status, 'Lunas');
     }
 
-    showCloudToast(`Pembayaran pesanan ${resi} telah dikonfirmasi Lunas! Pesanan kini Diproses.`);
+    showCloudToast(courierEta
+        ? `Pembayaran pesanan ${resi} terverifikasi Lunas! Kurir menjemput sekitar ${formatWibClock(courierEta)} WIB.`
+        : `Pembayaran pesanan ${resi} telah dikonfirmasi Lunas! Pesanan kini Diproses.${expressTarget ? ` Estimasi selesai ${formatWibPukul(expressTarget)}.` : ''}`);
 
     showReadableModal({
         icon: 'fa-solid fa-circle-check text-emerald-600',
         iconWrapClass: 'w-14 h-14 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm',
         title: 'Pembayaran Telah Dikonfirmasi!',
-        subtitle: `Status pembayaran pesanan ${resi} telah diverifikasi Lunas dan pesanan kini masuk antrean Diproses.`,
+        subtitle: courierEta
+            ? `Pembayaran pesanan ${resi} telah diverifikasi Lunas. Kurir akan menjemput cucian sekitar ${formatWibPukul(courierEta)} (${COURIER_PICKUP_DELAY_MIN} menit setelah verifikasi).`
+            : `Status pembayaran pesanan ${resi} telah diverifikasi Lunas dan pesanan kini masuk antrean Diproses.`,
         rows: [
             { label: 'Nomor Resi', value: item.resi, isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-mono font-bold bg-teal-50 text-teal-800 border border-teal-300' },
             { label: 'Pelanggan', value: item.nama },
             { label: 'Layanan Cucian', value: item.layanan },
+            ...(expressTarget ? [{ label: 'Estimasi Selesai', value: formatWibWhen(expressTarget), isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-violet-50 text-violet-700 border border-violet-200' }] : []),
+            ...(courierEta ? [{ label: 'Kurir Menjemput', value: formatWibWhen(courierEta), isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-blue-50 text-blue-700 border border-blue-200' }] : []),
             { label: 'Status Pengerjaan', value: item.status, isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-teal-50 text-teal-700 border border-teal-200' },
             { label: 'Status Pembayaran', value: 'Lunas', isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-emerald-50 text-emerald-700 border border-emerald-200' },
             { label: 'Total Masuk Omset', value: `Rp ${item.total.toLocaleString('id-ID')}`, highlight: true }
@@ -1344,32 +1971,33 @@ function switchPelangganTab(tab) {
 function getExpressPickupDeliveryTimes(tipe = 'Dijemput kurir') {
     const now = new Date();
     const isJemput = (tipe === 'Dijemput kurir');
+    const openNow = isWithinWorkingHours(now);
 
-    // Penjemputan segera 30-45 menit dari waktu pemesanan jika dijemput kurir
-    const pickupDate = new Date(now.getTime() + 30 * 60000);
-    const pickupH = String(pickupDate.getHours()).padStart(2, '0');
-    const pickupM = String(pickupDate.getMinutes()).padStart(2, '0');
-    const jamJemput = isJemput 
-        ? `Hari ini, pukul ${pickupH}:${pickupM} WIB (Segera ~30 Menit)`
-        : `Hari ini, bawa langsung ke toko (Buka s/d 20:00)`;
+    // Kurir menjemput 15 menit setelah pesanan diverifikasi admin (jam pastinya dicatat saat verifikasi)
+    const jamJemput = isJemput
+        ? `${COURIER_PICKUP_DELAY_MIN} menit setelah pesanan terverifikasi admin`
+        : (openNow
+            ? `Hari ini, bawa langsung ke toko (Buka s/d 20:00)`
+            : `${formatWibDayLabel(getNextOpening(now), now)}, bawa langsung ke toko (Buka 08:00 - 20:00)`);
 
-    // Pengantaran/selesai: H+4 Jam setelah order
-    const delivDate = new Date(now.getTime() + 4 * 3600000);
-    const delivH = String(delivDate.getHours()).padStart(2, '0');
-    const delivM = String(delivDate.getMinutes()).padStart(2, '0');
-    const isToday = delivDate.getDate() === now.getDate();
-    const dayLabel = isToday ? 'Hari ini' : 'Besok';
-    const jamAntar = `${dayLabel}, pukul ${delivH}:${delivM} WIB (4 Jam Selesai)`;
+    // Estimasi selesai TIDAK diberi jam saat order: 4 jam kerja baru dihitung sejak pakaian diterima di toko
+    // (jamnya muncul setelah admin mengonfirmasi pakaian diterima / status Diproses)
+    const jamAntar = EXPRESS_PENDING_TEXT;
 
-    const combined = isJemput 
-        ? `Diantar pada: ${jamAntar} (Jemput: ${jamJemput})`
-        : `Ambil pada: ${jamAntar}`;
+    const combined = isJemput
+        ? `Estimasi selesai: ${jamAntar} (Jemput: ${jamJemput})`
+        : `Estimasi selesai: ${jamAntar}`;
 
     return { jamJemput, jamAntar, combined };
 }
 
 // Perbarui Teks Jadwal berdasarkan Metode Pengambilan (Antar sendiri -> 'Ambil pada', Kurir -> 'Tentukan hari pengantaran')
 function updateJadwalLabels(pengambilanVal) {
+    updateJadwalLabelsBase(pengambilanVal);
+    updateQuickDayButtons();
+    updateJadwalTexts();
+}
+function updateJadwalLabelsBase(pengambilanVal) {
     const isAntarSendiri = (pengambilanVal === 'Antar sendiri ke toko');
 
     const titleEl = document.getElementById('label-jadwal-title');
@@ -1402,8 +2030,8 @@ function updateJadwalLabels(pengambilanVal) {
 
         if (expLabelJemput) expLabelJemput.innerHTML = '<i class="fa-solid fa-store text-amber-600"></i> Serah Terima di Toko:';
         if (expDescJemput) expDescJemput.innerText = 'Bawa cucian Anda langsung ke gerai toko DMS Laundry';
-        if (expLabelAntar) expLabelAntar.innerHTML = '<i class="fa-solid fa-clock text-emerald-600"></i> Ambil pada (4 Jam Selesai):';
-        if (expDescAntar) expDescAntar.innerText = 'Pakaian bersih rapi siap Anda ambil di toko dalam 4 jam';
+        if (expLabelAntar) expLabelAntar.innerHTML = '<i class="fa-solid fa-clock text-emerald-600"></i> Estimasi Selesai (4 Jam Kerja):';
+        if (expDescAntar) expDescAntar.innerText = 'Dihitung 4 jam kerja sejak pakaian diterima di toko; jamnya muncul setelah dikonfirmasi admin';
     } else {
         // Mode Dijemput kurir -> Tentukan hari pengantaran
         if (titleEl) titleEl.innerText = 'Tentukan Hari Pengantaran';
@@ -1420,9 +2048,9 @@ function updateJadwalLabels(pengambilanVal) {
         }
 
         if (expLabelJemput) expLabelJemput.innerHTML = '<i class="fa-solid fa-truck-pickup text-amber-600"></i> Jam Penjemputan Kurir:';
-        if (expDescJemput) expDescJemput.innerText = 'Kurir segera datang ke alamat Anda (~30 Menit)';
-        if (expLabelAntar) expLabelAntar.innerHTML = '<i class="fa-solid fa-house text-emerald-600"></i> Tentukan Hari & Jam Pengantaran (Selesai):';
-        if (expDescAntar) expDescAntar.innerText = 'H+4 Jam langsung diantar kembali oleh kurir';
+        if (expDescJemput) expDescJemput.innerText = `Kurir datang ±${COURIER_PICKUP_DELAY_MIN} menit setelah admin memverifikasi pesanan Anda`;
+        if (expLabelAntar) expLabelAntar.innerHTML = '<i class="fa-solid fa-house text-emerald-600"></i> Estimasi Selesai (4 Jam Kerja):';
+        if (expDescAntar) expDescAntar.innerText = 'Dihitung sejak pakaian diterima di toko; jamnya muncul setelah dikonfirmasi admin, lalu diantar kembali oleh kurir';
     }
 
     updatePelangganJadwalFromInputs();
@@ -1465,6 +2093,7 @@ function selectPelangganRadio(group, val, element) {
     }
     if (group === 'pengambilan') {
         document.getElementById('pelanggan-pengambilan-val').value = val;
+        updateCashMethodOption(); // Tunai ke kurir <-> Tunai
         const secAlamat = document.getElementById('section-pelanggan-alamat');
         const infoJemput = document.getElementById('info-kurir-jemput');
         const infoAntar = document.getElementById('info-antar-sendiri');
@@ -1505,12 +2134,7 @@ function selectPelangganRadio(group, val, element) {
 
 // Helpers Form Jadwal Pengambilan (Minimal H+1 dari hari ini)
 function getMinScheduleDate() {
-    const d = new Date();
-    d.setDate(d.getDate() + 1); // H+1
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
+    return getDateOffset(getScheduleRule().minDays); // H+1, atau H+2 untuk order di atas 5 kg
 }
 
 function getDateOffset(days) {
@@ -1526,9 +2150,13 @@ function initPelangganJadwal() {
     const tglInput = document.getElementById('pelanggan-tgl-ambil');
     if (!tglInput) return;
     const minDate = getMinScheduleDate();
+    const maxDate = getMaxScheduleDate();
     tglInput.min = minDate;
+    tglInput.max = maxDate;
     if (!tglInput.value || tglInput.value < minDate) {
         tglInput.value = minDate;
+    } else if (maxDate && tglInput.value > maxDate) {
+        tglInput.value = maxDate;
     }
 
     const boxExpress = document.getElementById('box-express-jadwal');
@@ -1577,14 +2205,20 @@ function updatePelangganJadwalFromInputs() {
     const tipePengambilan = document.getElementById('pelanggan-pengambilan-val')?.value || 'Dijemput kurir';
     const isAntarSendiri = (tipePengambilan === 'Antar sendiri ke toko');
 
+    const rule = getScheduleRule();
     const minDate = getMinScheduleDate();
+    const maxDate = getMaxScheduleDate();
     if (tglInput.value && tglInput.value < minDate) {
         const errorTitle = isAntarSendiri ? 'Jadwal Ambil di Toko' : 'Jadwal Pengantaran Kurir';
-        const errorMsg = isAntarSendiri 
-            ? 'Jadwal pengambilan pakaian bersih di toko minimal H+1 hari dari tanggal pemesanan!' 
-            : 'Jadwal pengantaran pakaian oleh kurir minimal H+1 hari dari tanggal pemesanan!';
+        const reason = rule.heavy ? ` (order di atas ${rule.thresholdKg} kg butuh pengerjaan minimal ${rule.minDays} hari)` : '';
+        const errorMsg = isAntarSendiri
+            ? `Jadwal pengambilan pakaian bersih di toko minimal H+${rule.minDays} hari dari tanggal pemesanan${reason}!`
+            : `Jadwal pengantaran pakaian oleh kurir minimal H+${rule.minDays} hari dari tanggal pemesanan${reason}!`;
         triggerLoginError(errorMsg, errorTitle);
         tglInput.value = minDate;
+    } else if (tglInput.value && maxDate && tglInput.value > maxDate) {
+        triggerLoginError(`Order di atas ${HEAVY_KG_THRESHOLD} kg maksimal selesai ${HEAVY_MAX_DAYS} hari (paling lambat H+${HEAVY_MAX_DAYS}).`, 'Jadwal Terlalu Lama');
+        tglInput.value = maxDate;
     }
 
     if (!tglInput.value) tglInput.value = minDate;
@@ -1626,6 +2260,8 @@ function calculatePelangganTotals() {
     if (ongText) ongText.innerText = `Rp ${ongkir.toLocaleString('id-ID')}`;
     if (totText) totText.innerText = `Rp ${total.toLocaleString('id-ID')}`;
 
+    applyWeightRules(); // batas berat & jadwal mengikuti berat/layanan
+
     return { berat, subtotal, ongkir, total, layanan, pengambilan };
 }
 
@@ -1644,15 +2280,34 @@ async function handleKirimPesananPelanggan(e) {
         return;
     }
 
+    // Validasi batas berat: Express maks 5 kg, Cuci Kiloan maks 15 kg
+    const weightRule = getWeightRules(layanan, berat);
+    if (berat > weightRule.maxKg) {
+        triggerLoginError(weightRule.express
+            ? `Maksimal order Express adalah ${MAX_KG_EXPRESS} kg. Kurangi berat atau pilih Cuci Kiloan (maksimal ${MAX_KG_NORMAL} kg).`
+            : `Maksimal order adalah ${MAX_KG_NORMAL} kg per pesanan. Silakan kurangi berat cucian.`, 'Berat Melebihi Batas');
+        return;
+    }
+
     const alamatEl = document.getElementById('pelanggan-alamat');
     const jamEl = document.getElementById('pelanggan-jam');
     const catatanEl = document.getElementById('pelanggan-catatan');
     const metodeEl = document.getElementById('pelanggan-metode-val');
 
     const alamat = (alamatEl && alamatEl.value ? alamatEl.value : '').trim();
-    const jam = (jamEl && jamEl.value ? jamEl.value : '').trim();
+    let jam = (jamEl && jamEl.value ? jamEl.value : '').trim();
     const catatan = (catatanEl && catatanEl.value ? catatanEl.value : '').trim();
-    const metode = (metodeEl && metodeEl.value ? metodeEl.value : 'Tunai saat jemput/antar');
+    let metode = (metodeEl && metodeEl.value ? metodeEl.value : getCashMethodLabel(pengambilan));
+    if (isCashMethod(metode)) metode = getCashMethodLabel(pengambilan); // pastikan sesuai jenis pengambilan
+
+    // Jadwal Express dihitung ulang saat dikirim (jam kerja bisa berubah sejak form dibuka)
+    const isExpressOrderNow = /express/i.test(String(layanan));
+    if (isExpressOrderNow) jam = getExpressPickupDeliveryTimes(pengambilan).combined;
+
+    // Order di luar jam kerja (08.00 - 20.00 WIB) otomatis masuk antrean dan ditangani saat toko buka
+    const orderTime = new Date();
+    const handleAt = isWithinWorkingHours(orderTime) ? null : getNextOpening(orderTime);
+    const offHours = !!handleAt;
 
     const isJemput = (pengambilan === 'Dijemput kurir');
     if (isJemput && !alamat) {
@@ -1663,7 +2318,7 @@ async function handleKirimPesananPelanggan(e) {
 
     const finalAlamat = isJemput ? alamat : (alamat || 'Antar & Ambil Sendiri di Gerai DMS Laundry');
     const resi = getNextResiNumber();
-    const isNonCash = (metode !== 'Tunai saat jemput/antar');
+    const isNonCash = !isCashMethod(metode);
 
     // Status otomatis: jika transfer/QRIS/E-wallet -> Menunggu Konfirmasi (agar tidak rugi sebelum diverifikasi admin)
     const orderStatus = isNonCash ? 'Menunggu Konfirmasi' : 'Baru';
@@ -1677,7 +2332,7 @@ async function handleKirimPesananPelanggan(e) {
         berat,
         tipe: pengambilan,
         alamat: finalAlamat,
-        jam,
+        jam: offHours ? appendQueueTag(jam, handleAt) : jam,
         catatan,
         subtotal,
         diskon: 0,
@@ -1697,23 +2352,41 @@ async function handleKirimPesananPelanggan(e) {
 
     // Tampilkan Pop-Up Rincian Pesanan yang Mudah Dibaca
     const modalSubtitle = isJemput
-        ? 'Kurir DMS Laundry akan langsung mendatangi alamat Anda untuk mengambil pakaian cucian setelah pesanan diproses.'
+        ? `Kurir DMS Laundry akan mendatangi alamat Anda untuk mengambil pakaian cucian ${COURIER_PICKUP_DELAY_MIN} menit setelah pesanan Anda diverifikasi admin.`
         : 'Silakan serahkan pakaian cucian Anda langsung ke gerai toko DMS Laundry sesuai jadwal.';
+
+    // Informasi antrean jika order masuk di luar jam kerja
+    const queueLabel = offHours ? formatWibWhen(handleAt, orderTime) : '';
+    const queueIntro = offHours ? `Pesanan diterima di luar jam kerja (08.00 - 20.00 WIB) dan otomatis ditangani mulai ${queueLabel}.` : '';
+    const queueRows = offHours
+        ? [{ label: 'Mulai Ditangani', value: queueLabel, isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-indigo-50 text-indigo-700 border border-indigo-200' }]
+        : [];
+    const heavyRows = (!isExpressOrderNow && weightRule.heavy)
+        ? [{ label: 'Lama Pengerjaan', value: `Order di atas ${weightRule.thresholdKg} kg: minimal ${weightRule.minDays} hari, maksimal selesai ${weightRule.maxDays} hari` }]
+        : [];
+    const pickupRows = isJemput
+        ? [{ label: 'Penjemputan Kurir', value: `${COURIER_PICKUP_DELAY_MIN} menit setelah pesanan terverifikasi admin` }]
+        : [];
 
     if (isNonCash) {
         showReadableModal({
             icon: 'fa-solid fa-clock text-amber-600',
             iconWrapClass: 'w-14 h-14 bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm',
             title: 'Pesanan Berhasil Dibuat!',
-            subtitle: modalSubtitle,
+            subtitle: offHours ? `${queueIntro} ${modalSubtitle}` : modalSubtitle,
             rows: [
                 { label: 'Nomor Resi', value: resi, isBadge: true, badgeClass: 'px-2.5 py-1 rounded-md font-extrabold text-teal-800 bg-teal-50 border border-teal-300 font-mono text-xs' },
                 { label: 'Layanan Cucian', value: `${layanan} (${berat} kg)` },
                 { label: 'Metode Pengantaran', value: `${pengambilan} (${ongkir > 0 ? 'Ongkir Rp ' + ongkir.toLocaleString('id-ID') : 'Gratis / Rp 0'})` },
-                { label: isJemput ? 'Hari & Jam Pengantaran' : 'Ambil pada', value: jam || 'Segera' },
+                (isExpressOrderNow
+                    ? { label: 'Estimasi Selesai', value: 'Dihitung 4 jam kerja sejak pakaian diterima di toko; jamnya muncul setelah dikonfirmasi admin' }
+                    : { label: isJemput ? 'Hari & Jam Pengantaran' : 'Ambil pada', value: jam || 'Segera' }),
                 { label: isJemput ? 'Alamat Penjemputan' : 'Lokasi Serah Terima', value: finalAlamat },
                 { label: 'Total Pembayaran', value: `Rp ${total.toLocaleString('id-ID')}`, highlight: true },
                 { label: 'Metode Pembayaran', value: metode },
+                ...heavyRows,
+                ...pickupRows,
+                ...queueRows,
                 { label: 'Status Pesanan', value: 'Menunggu Konfirmasi Admin', isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-amber-50 text-amber-700 border border-amber-300' }
             ],
             primaryBtn: {
@@ -1736,15 +2409,20 @@ async function handleKirimPesananPelanggan(e) {
             icon: 'fa-solid fa-circle-check text-emerald-600',
             iconWrapClass: 'w-14 h-14 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-sm',
             title: 'Pesanan Berhasil Dibuat!',
-            subtitle: modalSubtitle,
+            subtitle: `${offHours ? queueIntro + ' ' : ''}${modalSubtitle} ${isJemput ? 'Siapkan uang tunai untuk dibayarkan langsung ke kurir.' : 'Pembayaran tunai dilakukan di toko saat Anda menyerahkan cucian.'}`,
             rows: [
                 { label: 'Nomor Resi', value: resi, isBadge: true, badgeClass: 'px-2.5 py-1 rounded-md font-extrabold text-teal-800 bg-teal-50 border border-teal-300 font-mono text-xs' },
                 { label: 'Layanan Cucian', value: `${layanan} (${berat} kg)` },
                 { label: 'Metode Pengantaran', value: `${pengambilan} (${ongkir > 0 ? 'Ongkir Rp ' + ongkir.toLocaleString('id-ID') : 'Gratis / Rp 0'})` },
-                { label: isJemput ? 'Hari & Jam Pengantaran' : 'Ambil pada', value: jam || 'Segera' },
+                (isExpressOrderNow
+                    ? { label: 'Estimasi Selesai', value: 'Dihitung 4 jam kerja sejak pakaian diterima di toko; jamnya muncul setelah dikonfirmasi admin' }
+                    : { label: isJemput ? 'Hari & Jam Pengantaran' : 'Ambil pada', value: jam || 'Segera' }),
                 { label: isJemput ? 'Alamat Penjemputan' : 'Lokasi Serah Terima', value: finalAlamat },
                 { label: 'Total Estimasi', value: `Rp ${total.toLocaleString('id-ID')}`, highlight: true },
-                { label: 'Metode Pembayaran', value: 'Tunai saat jemput/antar' },
+                { label: 'Metode Pembayaran', value: metode },
+                ...heavyRows,
+                ...pickupRows,
+                ...queueRows,
                 { label: 'Status Pesanan', value: 'Baru', isBadge: true, badgeClass: 'px-2 py-0.5 rounded font-bold bg-slate-100 text-slate-700 border border-slate-200' }
             ],
             primaryBtn: {
@@ -1816,9 +2494,12 @@ function renderPelangganOrders() {
             `;
         }
 
+        // Info antrean jika pesanan masuk di luar jam kerja
+        statusNotice = getQueueNoticeHtml(item) + getCourierNoticeHtml(item) + getExpressNoticeHtml(item) + statusNotice;
+
         // Tombol Bayar QRIS jika belum lunas / masih menunggu konfirmasi
         let payBtn = '';
-        if (item.statusBayar !== 'Lunas' && item.metode !== 'Tunai saat jemput/antar') {
+        if (item.statusBayar !== 'Lunas' && !isCashMethod(item.metode)) {
             const payView = getPaymentView(normalizePaymentMethod(item.metode));
             const btnText = item.status === 'Menunggu Konfirmasi' ? `Lihat Pembayaran ${payView.label}` : `Bayar Sekarang via ${payView.label}`;
             payBtn = `
@@ -1838,7 +2519,7 @@ function renderPelangganOrders() {
                 </div>
                 ${statusNotice}
                 <div class="text-xs text-slate-500">
-                    ${item.layanan} · Estimasi / Jadwal: <span class="font-semibold text-slate-700 font-mono">${item.jam || item.tanggal}</span>
+                    ${item.layanan} · Estimasi / Jadwal: <span class="font-semibold text-slate-700 font-mono">${displayJam(item.jam) || item.tanggal}</span>
                 </div>
                 <div class="flex justify-between items-center pt-2 border-t border-slate-100 text-xs">
                     <span class="text-slate-600">${item.metode} · ${bayarBadge}</span>
@@ -1852,6 +2533,159 @@ function renderPelangganOrders() {
 
 // Modal Pop-up QRIS & Data Rekening (GoPay & Bank Jago dari QRIS.zip)
 let currentPayingResi = null;
+
+// ========================================================
+// ATURAN BERAT CUCIAN & LAMA PENGERJAAN
+// - Express: maksimal 5 kg
+// - Cuci Kiloan: maksimal 15 kg
+// - Kiloan di atas 5 kg: pengerjaan minimal 2 hari dan maksimal selesai 4 hari (jadwal H+2 s/d H+4)
+// - Kiloan di atas 10 kg: paling cepat H+3 (jadwal H+3 s/d H+4)
+// ========================================================
+const MAX_KG_EXPRESS = 5;
+const MAX_KG_NORMAL = 15;
+const HEAVY_KG_THRESHOLD = 5;
+const HEAVY_MIN_DAYS = 2;
+const HEAVY_MAX_DAYS = 4;
+const XHEAVY_KG_THRESHOLD = 10;   // di atas 10 kg: paling cepat H+3
+const XHEAVY_MIN_DAYS = 3;
+const QUICK_DAY_INACTIVE = 'btn-quick-day flex-1 py-1 rounded-lg border border-slate-200 hover:border-teal-600 text-slate-600 text-[10px] font-medium text-center transition';
+const QUICK_DAY_ACTIVE = 'btn-quick-day active flex-1 py-1 rounded-lg border border-teal-600 bg-teal-50 text-teal-800 text-[10px] font-bold text-center transition';
+
+function getWeightRules(layanan, berat) {
+    if (/express/i.test(String(layanan))) {
+        return { express: true, maxKg: MAX_KG_EXPRESS, heavy: false, thresholdKg: null, minDays: 1, maxDays: null };
+    }
+    if (berat > XHEAVY_KG_THRESHOLD) {
+        return { express: false, maxKg: MAX_KG_NORMAL, heavy: true, thresholdKg: XHEAVY_KG_THRESHOLD, minDays: XHEAVY_MIN_DAYS, maxDays: HEAVY_MAX_DAYS };
+    }
+    if (berat > HEAVY_KG_THRESHOLD) {
+        return { express: false, maxKg: MAX_KG_NORMAL, heavy: true, thresholdKg: HEAVY_KG_THRESHOLD, minDays: HEAVY_MIN_DAYS, maxDays: HEAVY_MAX_DAYS };
+    }
+    return { express: false, maxKg: MAX_KG_NORMAL, heavy: false, thresholdKg: null, minDays: 1, maxDays: null };
+}
+// Aturan yang berlaku untuk isi form saat ini
+function getScheduleRule() {
+    const layanan = (document.getElementById('pelanggan-layanan-val') || {}).value || 'Cuci Kiloan';
+    const berat = parseFloat((document.getElementById('pelanggan-berat') || {}).value) || 1;
+    return getWeightRules(layanan, berat);
+}
+function getMaxScheduleDate() {
+    const r = getScheduleRule();
+    return r.maxDays ? getDateOffset(r.maxDays) : '';
+}
+
+// Tombol cepat pilihan hari mengikuti aturan (H+1..H+3 biasa, H+2..H+4 untuk di atas 5 kg)
+function updateQuickDayButtons() {
+    const box = document.getElementById('pelanggan-quick-days');
+    if (!box) return;
+    const isAntarSendiri = ((document.getElementById('pelanggan-pengambilan-val') || {}).value === 'Antar sendiri ke toko');
+    const rule = getScheduleRule();
+    const minDays = rule.minDays;
+    const selected = (document.getElementById('pelanggan-tgl-ambil') || {}).value;
+    const verb = isAntarSendiri ? 'Ambil' : 'Diantar';
+    const names = { 1: 'Besok', 2: 'Lusa' };
+    box.querySelectorAll('.btn-quick-day').forEach((b, i) => {
+        const off = minDays + i;
+        b.setAttribute('onclick', `setPelangganQuickDay(${off}, this)`);
+        b.innerText = names[off] ? `${verb} ${names[off]} (H+${off})` : `${verb} H+${off}`;
+        b.className = (selected && selected === getDateOffset(off)) ? QUICK_DAY_ACTIVE : QUICK_DAY_INACTIVE;
+        if (rule.maxDays && off > rule.maxDays) b.classList.add('hidden'); // di luar batas maksimal selesai
+    });
+}
+
+// Teks batas hari pada judul jadwal
+function updateJadwalTexts() {
+    const rule = getScheduleRule();
+    const isAntarSendiri = ((document.getElementById('pelanggan-pengambilan-val') || {}).value === 'Antar sendiri ke toko');
+    const range = rule.maxDays ? `H+${rule.minDays} sampai H+${rule.maxDays}` : `Minimal H+${rule.minDays}`;
+    const rangeShort = rule.maxDays ? `H+${rule.minDays} s/d H+${rule.maxDays}` : `Min. H+${rule.minDays}`;
+    const subtitleEl = document.getElementById('label-jadwal-subtitle');
+    const tglLabelEl = document.getElementById('label-jadwal-tgl');
+    const badge = document.getElementById('pelanggan-jadwal-badge');
+    if (subtitleEl) subtitleEl.innerText = isAntarSendiri
+        ? `Pilih jadwal Anda mengambil pakaian bersih di gerai toko DMS Laundry (${range})`
+        : `Tentukan hari dan jam pengantaran oleh kurir ke alamat Anda (${range})`;
+    if (tglLabelEl) tglLabelEl.innerText = isAntarSendiri
+        ? `Ambil pada Hari / Tanggal (${rangeShort})`
+        : `Tentukan Hari / Tanggal Pengantaran (${rangeShort})`;
+    if (badge) badge.innerText = rule.maxDays ? `H+${rule.minDays} - H+${rule.maxDays}` : `Minimal H+${rule.minDays}`;
+}
+
+// Batas tanggal mengikuti berat; tanggal yang di luar batas dirapikan tanpa pesan (berat baru saja diubah)
+function syncScheduleLimits() {
+    const tglInput = document.getElementById('pelanggan-tgl-ambil');
+    if (tglInput) {
+        const minDate = getMinScheduleDate();
+        const maxDate = getMaxScheduleDate();
+        tglInput.min = minDate;
+        tglInput.max = maxDate;
+        if (!tglInput.value || tglInput.value < minDate) tglInput.value = minDate;
+        else if (maxDate && tglInput.value > maxDate) tglInput.value = maxDate;
+    }
+    updateQuickDayButtons();
+    updateJadwalTexts();
+    const layanan = (document.getElementById('pelanggan-layanan-val') || {}).value;
+    if (!/express/i.test(String(layanan))) updatePelangganJadwalFromInputs();
+}
+
+// Periksa berat terhadap batas, tampilkan petunjuk/peringatan, dan sesuaikan jadwal
+function applyWeightRules() {
+    const input = document.getElementById('pelanggan-berat');
+    if (!input) return { ok: true, message: '' };
+    const layanan = (document.getElementById('pelanggan-layanan-val') || {}).value || 'Cuci Kiloan';
+    const berat = parseFloat(input.value) || 0;
+    const rule = getWeightRules(layanan, berat);
+    input.max = String(rule.maxKg);
+
+    const hint = document.getElementById('pelanggan-berat-hint');
+    if (hint) hint.innerText = `Order 1 - ${rule.maxKg} kg`;
+
+    let message = '';
+    let tone = 'info';
+    if (berat > rule.maxKg) {
+        message = rule.express
+            ? `Maksimal order Express ${MAX_KG_EXPRESS} kg. Kurangi berat atau pilih Cuci Kiloan (maksimal ${MAX_KG_NORMAL} kg).`
+            : `Maksimal order ${MAX_KG_NORMAL} kg per pesanan.`;
+        tone = 'error';
+    } else if (rule.express) {
+        message = `Express maksimal ${MAX_KG_EXPRESS} kg per pesanan.`;
+    } else if (rule.heavy) {
+        message = `Order di atas ${rule.thresholdKg} kg: pengerjaan minimal ${rule.minDays} hari dan maksimal selesai ${rule.maxDays} hari. Jadwal dipilih H+${rule.minDays} sampai H+${rule.maxDays}.`;
+        tone = 'warn';
+    } else {
+        message = `Maksimal ${MAX_KG_NORMAL} kg. Di atas ${HEAVY_KG_THRESHOLD} kg pengerjaan minimal ${HEAVY_MIN_DAYS} hari, di atas ${XHEAVY_KG_THRESHOLD} kg minimal ${XHEAVY_MIN_DAYS} hari (maksimal selesai ${HEAVY_MAX_DAYS} hari).`;
+    }
+    const info = document.getElementById('pelanggan-berat-info');
+    if (info) {
+        info.innerText = message;
+        const tones = {
+            info: 'text-slate-500',
+            warn: 'text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1.5',
+            error: 'text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 font-semibold'
+        };
+        info.className = `mt-2 text-[11px] ${tones[tone]}`;
+    }
+    syncScheduleLimits();
+    return { ok: berat >= 1 && berat <= rule.maxKg, rule, message, tone };
+}
+
+// ---- Metode TUNAI menyesuaikan jenis pengambilan ----
+// Dijemput kurir -> "Tunai ke kurir"; Antar sendiri ke toko -> "Tunai"
+function isCashMethod(metode) {
+    return /tunai/i.test(String(metode || ''));
+}
+function getCashMethodLabel(tipe) {
+    const t = tipe || (document.getElementById('pelanggan-pengambilan-val') || {}).value || 'Dijemput kurir';
+    return t === 'Dijemput kurir' ? 'Tunai ke kurir' : 'Tunai';
+}
+// Ubah tulisan pilihan Tunai di form, dan nilai terpilihnya jika Tunai sedang dipilih
+function updateCashMethodOption() {
+    const label = getCashMethodLabel();
+    const labelEl = document.getElementById('pelanggan-pill-tunai-label');
+    if (labelEl) labelEl.innerText = label;
+    const hidden = document.getElementById('pelanggan-metode-val');
+    if (hidden && isCashMethod(hidden.value)) hidden.value = label;
+}
 
 // Tentukan jenis metode dari teks metode yang tersimpan pada pesanan
 function normalizePaymentMethod(metode) {
@@ -2446,17 +3280,7 @@ async function initDataSync() {
                 saveData();
                 unsynced.forEach(o => pushOrderToCloud(o));
 
-                if (currentUser) {
-                    if (currentUser.role === 'admin') {
-                        refreshNextAutoResi();
-                        renderOnlineOrdersTable();
-                    } else if (currentUser.role === 'pelanggan') {
-                        renderPelangganOrders();
-                    } else if (currentUser.role === 'owner') {
-                        renderOwnerStats();
-                        renderOwnerDetailedReport();
-                    }
-                }
+                refreshRoleViews();
             }
         }
     } catch (err) {
@@ -2475,4 +3299,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 initPelangganJadwal();
+updateJamKerjaBanner();
+updateCashMethodOption();
+setInterval(workingHoursTick, 30000);
 initDataSync();
